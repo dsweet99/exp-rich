@@ -1,16 +1,13 @@
 import sys
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from ._emoji_replace import _emoji_replace
-from .jupyter import JupyterMixin
-from .segment import Segment
-from .style import Style
+from ._emoji_variant import EmojiVariant
+from ._jupyter_mixin import JupyterMixin
 
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderResult
-
-
-EmojiVariant = Literal["emoji", "text"]
+    from .style import Style
 
 
 class NoEmoji(Exception):
@@ -25,7 +22,7 @@ class Emoji(JupyterMixin):
     def __init__(
         self,
         name: str,
-        style: Union[str, Style] = "none",
+        style: Union[str, "Style"] = "none",
         variant: Optional[EmojiVariant] = None,
     ) -> None:
         """A single emoji character.
@@ -70,16 +67,18 @@ class Emoji(JupyterMixin):
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
+        from .segment import Segment
+
         yield Segment(self._char, console.get_style(self.style))
 
 
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
-    from rich.columns import Columns
-    from rich.console import Console
+    from ._runtime import _mod, get_console_class
 
-    console = Console(record=True)
+    Columns = _mod("rich.columns").Columns
+    console = get_console_class()(record=True)
 
     from ._emoji_codes import EMOJI
 

@@ -11,7 +11,7 @@ import pytest
 
 from rich.console import Console
 from rich.measure import Measurement
-from rich.pretty import Node, Pretty, _ipy_display_hook, install, pprint, pretty_repr
+from rich.pretty import Node, Pretty, _Line, _ipy_display_hook, install, pprint, pretty_repr
 from rich.text import Text
 
 skip_py38 = pytest.mark.skipif(
@@ -42,6 +42,20 @@ skip_py314 = pytest.mark.skipif(
     sys.version_info.minor == 14 and sys.version_info.major == 3,
     reason="rendered differently on py3.14",
 )
+
+
+def test_node_iter_tokens_and_check_length() -> None:
+    node = Node(value_repr="hello")
+    assert list(node.iter_tokens()) == ["hello"]
+    assert node.check_length(0, 80) is True
+
+
+def test_line_expandable_and_check_length() -> None:
+    child = Node(value_repr="x", last=True)
+    parent = Node(open_brace="{", close_brace="}", children=[child], last=True)
+    line = _Line(node=parent, is_root=True)
+    assert line.expandable is True
+    assert line.check_length(80) is True
 
 
 def test_install() -> None:

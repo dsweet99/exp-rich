@@ -34,3 +34,16 @@ def test_clamp():
     assert measurement.clamp(None, 50) == Measurement(20, 50)
     assert measurement.clamp(30, None) == Measurement(30, 100)
     assert measurement.clamp(None, None) == Measurement(20, 100)
+
+
+def test_normalize():
+    assert Measurement(-5, 10).normalize() == Measurement(0, 10)
+    assert Measurement(20, 10).normalize() == Measurement(10, 10)
+
+
+def test_with_maximum():
+    assert Measurement(5, 100).with_maximum(50) == Measurement(5, 50)
+
+
+def test_with_minimum():
+    assert Measurement(5, 100).with_minimum(20) == Measurement(20, 100)

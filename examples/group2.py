@@ -9,4 +9,5 @@ def get_panels():
     yield Panel("World", style="on red")
 
 
-print(Panel(get_panels()))
+if __name__ == "__main__":
+    print(Panel(get_panels()))

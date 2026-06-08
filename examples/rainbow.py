@@ -16,5 +16,6 @@ class RainbowHighlighter(Highlighter):
             text.stylize(f"color({randint(16, 255)})", index, index + 1)
 
 
-rainbow = RainbowHighlighter()
-print(rainbow("I must not fear. Fear is the mind-killer."))
+if __name__ == "__main__":
+    rainbow = RainbowHighlighter()
+    print(rainbow("I must not fear. Fear is the mind-killer."))

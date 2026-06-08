@@ -9,17 +9,18 @@ Rich can exclude frames in the middle to avoid huge tracebacks.
 from rich.console import Console
 
 
-def foo(n):
-    return bar(n)
+def recursive_foo(n):
+    return recursive_bar(n)
 
 
-def bar(n):
-    return foo(n)
+def recursive_bar(n):
+    return recursive_foo(n)
 
 
 console = Console()
 
-try:
-    foo(1)
-except Exception:
-    console.print_exception(max_frames=20)
+if __name__ == "__main__":
+    try:
+        recursive_foo(1)
+    except Exception:
+        console.print_exception(max_frames=20)

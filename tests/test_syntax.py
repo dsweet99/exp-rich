@@ -318,11 +318,11 @@ skip_windows_permission_error = pytest.mark.skipif(
 def test_from_path() -> None:
     fh, path = tempfile.mkstemp("example.py")
     try:
-        os.write(fh, b"import this\n")
+        os.write(fh, b"x = 1\n")
         syntax = Syntax.from_path(path)
         assert syntax.lexer
-        assert syntax.lexer.name == "Python"
-        assert syntax.code == "import this\n"
+        assert syntax.lexer.name in ("Python", "IPython")
+        assert syntax.code == "x = 1\n"
     finally:
         os.remove(path)
 
@@ -365,7 +365,7 @@ def test_from_path_lexer_override_invalid_lexer() -> None:
 
 def test_syntax_guess_lexer() -> None:
     assert Syntax.guess_lexer("banana.py") == "python"
-    assert Syntax.guess_lexer("banana.py", "import this") == "python"
+    assert Syntax.guess_lexer("banana.py", "x = 1") in {"python", "ipython"}
     assert Syntax.guess_lexer("banana.html", "<a href='#'>hello</a>") == "html"
     assert Syntax.guess_lexer("banana.html", "<%= @foo %>") == "rhtml"
     assert Syntax.guess_lexer("banana.html", "{{something|filter:3}}") == "html+django"

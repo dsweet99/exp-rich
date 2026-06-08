@@ -1,26 +1,12 @@
 """Rich text and beautiful formatting in the terminal."""
-
-import os
 from typing import IO, TYPE_CHECKING, Any, Callable, Optional, Union
 
-from ._extension import load_ipython_extension  # noqa: F401
+from ._import_cwd import _IMPORT_CWD
 
-__all__ = ["get_console", "reconfigure", "print", "inspect", "print_json"]
+__all__ = ['get_console', 'reconfigure', 'print', 'inspect', 'print_json', 'load_ipython_extension']
+_console: Optional['Console'] = None
 
-if TYPE_CHECKING:
-    from .console import Console
-
-# Global console used by alternative print
-_console: Optional["Console"] = None
-
-try:
-    _IMPORT_CWD = os.path.abspath(os.getcwd())
-except FileNotFoundError:
-    # Can happen if the cwd has been deleted
-    _IMPORT_CWD = ""
-
-
-def get_console() -> "Console":
+def get_console() -> 'Console':
     """Get a global :class:`~rich.console.Console` instance. This function is used when Rich requires a Console,
     and hasn't been explicitly given one.
 
@@ -30,11 +16,8 @@ def get_console() -> "Console":
     global _console
     if _console is None:
         from .console import Console
-
         _console = Console()
-
     return _console
-
 
 def reconfigure(*args: Any, **kwargs: Any) -> None:
     """Reconfigures the global console by replacing it with another.
@@ -44,49 +27,27 @@ def reconfigure(*args: Any, **kwargs: Any) -> None:
         **kwargs (Any): Keyword arguments for the replacement :class:`~rich.console.Console`.
     """
     from rich.console import Console
-
     new_console = Console(*args, **kwargs)
     _console = get_console()
     _console.__dict__ = new_console.__dict__
 
-
-def print(
-    *objects: Any,
-    sep: str = " ",
-    end: str = "\n",
-    file: Optional[IO[str]] = None,
-    flush: bool = False,
-) -> None:
-    r"""Print object(s) supplied via positional arguments.
+def rich_print(*objects: Any, sep: str=' ', end: str='\n', file: Optional[IO[str]]=None, flush: bool=False) -> None:
+    """Print object(s) supplied via positional arguments.
     This function has an identical signature to the built-in print.
     For more advanced features, see the :class:`~rich.console.Console` class.
 
     Args:
         sep (str, optional): Separator between printed objects. Defaults to " ".
-        end (str, optional): Character to write at end of output. Defaults to "\\n".
+        end (str, optional): Character to write at end of output. Defaults to "\\\\n".
         file (IO[str], optional): File to write to, or None for stdout. Defaults to None.
         flush (bool, optional): Has no effect as Rich always flushes output. Defaults to False.
 
     """
     from .console import Console
-
     write_console = get_console() if file is None else Console(file=file)
     return write_console.print(*objects, sep=sep, end=end)
 
-
-def print_json(
-    json: Optional[str] = None,
-    *,
-    data: Any = None,
-    indent: Union[None, int, str] = 2,
-    highlight: bool = True,
-    skip_keys: bool = False,
-    ensure_ascii: bool = False,
-    check_circular: bool = True,
-    allow_nan: bool = True,
-    default: Optional[Callable[[Any], Any]] = None,
-    sort_keys: bool = False,
-) -> None:
+def rich_print_json(json: Optional[str]=None, *, data: Any=None, indent: Union[None, int, str]=2, highlight: bool=True, skip_keys: bool=False, ensure_ascii: bool=False, check_circular: bool=True, allow_nan: bool=True, default: Optional[Callable[[Any], Any]]=None, sort_keys: bool=False) -> None:
     """Pretty prints JSON. Output will be valid JSON.
 
     Args:
@@ -102,35 +63,17 @@ def print_json(
             in to something that can be JSON encoded. Defaults to None.
         sort_keys (bool, optional): Sort dictionary keys. Defaults to False.
     """
+    get_console().print_json(json, data=data, indent=indent, highlight=highlight, skip_keys=skip_keys, ensure_ascii=ensure_ascii, check_circular=check_circular, allow_nan=allow_nan, default=default, sort_keys=sort_keys)
+print = rich_print
+print_json = rich_print_json
 
-    get_console().print_json(
-        json,
-        data=data,
-        indent=indent,
-        highlight=highlight,
-        skip_keys=skip_keys,
-        ensure_ascii=ensure_ascii,
-        check_circular=check_circular,
-        allow_nan=allow_nan,
-        default=default,
-        sort_keys=sort_keys,
-    )
+def __getattr__(name: str) -> Any:
+    if name == 'load_ipython_extension':
+        from ._extension import load_ipython_extension
+        return load_ipython_extension
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
-
-def inspect(
-    obj: Any,
-    *,
-    console: Optional["Console"] = None,
-    title: Optional[str] = None,
-    help: bool = False,
-    methods: bool = False,
-    docs: bool = True,
-    private: bool = False,
-    dunder: bool = False,
-    sort: bool = True,
-    all: bool = False,
-    value: bool = True,
-) -> None:
+def inspect(obj: Any, *, console: Optional['Console']=None, title: Optional[str]=None, help: bool=False, methods: bool=False, docs: bool=True, private: bool=False, dunder: bool=False, sort: bool=True, all: bool=False, value: bool=True) -> None:
     """Inspect any Python object.
 
     * inspect(<OBJECT>) to see summarized info.
@@ -154,24 +97,6 @@ def inspect(
     """
     _console = console or get_console()
     from rich._inspect import Inspect
-
-    # Special case for inspect(inspect)
     is_inspect = obj is inspect
-
-    _inspect = Inspect(
-        obj,
-        title=title,
-        help=is_inspect or help,
-        methods=is_inspect or methods,
-        docs=is_inspect or docs,
-        private=private,
-        dunder=dunder,
-        sort=sort,
-        all=all,
-        value=value,
-    )
+    _inspect = Inspect(obj, title=title, help=is_inspect or help, methods=is_inspect or methods, docs=is_inspect or docs, private=private, dunder=dunder, sort=sort, all=all, value=value)
     _console.print(_inspect)
-
-
-if __name__ == "__main__":  # pragma: no cover
-    print("Hello, **World**")

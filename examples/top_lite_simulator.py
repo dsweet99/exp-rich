@@ -73,7 +73,8 @@ def create_process_table(height: int) -> Table:
 
 console = Console()
 
-with Live(console=console, screen=True, auto_refresh=False) as live:
-    while True:
-        live.update(create_process_table(console.size.height - 4), refresh=True)
-        time.sleep(1)
+if __name__ == "__main__":
+    with Live(console=console, screen=True, auto_refresh=False) as live:
+        while True:
+            live.update(create_process_table(console.size.height - 4), refresh=True)
+            time.sleep(1)

@@ -1,13 +1,13 @@
 import re
 from ast import literal_eval
 from operator import attrgetter
-from typing import Callable, Iterable, List, Match, NamedTuple, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Match, NamedTuple, Optional, Tuple, Union
 
 from ._emoji_replace import _emoji_replace
-from .emoji import EmojiVariant
+from ._emoji_variant import EmojiVariant
 from .errors import MarkupError
 from .style import Style
-from .text import Span, Text
+from ._highlight_bridge import make_span, text_create
 
 RE_TAGS = re.compile(
     r"""((\\*)\[([a-z#/@][^[]*?)])""",
@@ -58,12 +58,12 @@ def escape(
         str: Markup with square brackets escaped.
     """
 
-    def escape_backslashes(match: Match[str]) -> str:
-        """Called by re.sub replace matches."""
-        backslashes, text = match.groups()
-        return f"{backslashes}{backslashes}\\{text}"
-
-    markup = _escape(escape_backslashes, markup)
+    markup = _escape(
+        lambda match: (
+            f"{match.group(1)}{match.group(1)}\\{match.group(2)}"
+        ),
+        markup,
+    )
     if markup.endswith("\\") and not markup.endswith("\\\\"):
         return markup + "\\"
 
@@ -103,149 +103,143 @@ def _parse(markup: str) -> Iterable[Tuple[int, Optional[str], Optional[Tag]]]:
         yield position, markup[position:], None
 
 
-def render(
+def _render_unmarked(
+    markup: str,
+    style: Union[str, Style],
+    emoji: bool,
+    emoji_variant: Optional[EmojiVariant],
+) -> Any:
+    plain = (
+        _emoji_replace(markup, default_variant=emoji_variant) if emoji else markup
+    )
+    return text_create(plain, style=style)
+
+
+def _pop_style_from_stack(
+    style_stack: List[Tuple[int, Tag]], style_name: str
+) -> Tuple[int, Tag]:
+    pop = style_stack.pop
+    for index, (_, tag) in enumerate(reversed(style_stack), 1):
+        if tag.name == style_name:
+            return pop(-index)
+    raise KeyError(style_name)
+
+
+def _handler_meta_params(tag: Tag) -> tuple:
+    if not tag.parameters:
+        return ()
+    handler_name = ""
+    parameters = tag.parameters.strip()
+    handler_match = RE_HANDLER.match(parameters)
+    if handler_match is not None:
+        handler_name, match_parameters = handler_match.groups()
+        parameters = "()" if match_parameters is None else match_parameters
+    try:
+        meta_params = literal_eval(parameters)
+    except SyntaxError as error:
+        raise MarkupError(
+            f"error parsing {parameters!r} in {tag.parameters!r}; {error.msg}"
+        ) from None
+    except Exception as error:
+        raise MarkupError(f"error parsing {tag.parameters!r}; {error}") from None
+    if not handler_name:
+        return meta_params if isinstance(meta_params, tuple) else (meta_params,)
+    payload = meta_params if isinstance(meta_params, tuple) else (meta_params,)
+    return handler_name, payload
+
+
+def _pop_closing_tag(
+    tag: Tag,
+    position: int,
+    style_stack: List[Tuple[int, Tag]],
+) -> Tuple[int, Tag]:
+    style_name = tag.name[1:].strip()
+    if style_name:
+        style_name = Style.normalize(style_name)
+        try:
+            return _pop_style_from_stack(style_stack, style_name)
+        except KeyError:
+            raise MarkupError(
+                f"closing tag '{tag.markup}' at position {position} doesn't match any open tag"
+            ) from None
+    try:
+        return style_stack.pop()
+    except IndexError:
+        raise MarkupError(
+            f"closing tag '[/]' at position {position} has nothing to close"
+        ) from None
+
+
+def _close_markup_tag(
+    tag: Tag,
+    position: int,
+    style_stack: List[Tuple[int, Tag]],
+    text: Any,
+    spans: List[Any],
+) -> None:
+    start, open_tag = _pop_closing_tag(tag, position, style_stack)
+    if open_tag.name.startswith("@"):
+        meta_params = _handler_meta_params(open_tag)
+        spans.append(
+            make_span(start, len(text), Style(meta={open_tag.name: meta_params}))
+        )
+        return
+    spans.append(make_span(start, len(text), str(open_tag)))
+
+
+def _apply_markup_token(
+    position: int,
+    plain_text: Optional[str],
+    tag: Optional[Tag],
+    text: Any,
+    style_stack: List[Tuple[int, Tag]],
+    spans: List[Any],
+    emoji: bool,
+) -> None:
+    if plain_text is not None:
+        plain_text = plain_text.replace("\\[", "[")
+        text.append(_emoji_replace(plain_text) if emoji else plain_text)
+        return
+    if tag is None:
+        return
+    if tag.name.startswith("/"):
+        _close_markup_tag(tag, position, style_stack, text, spans)
+        return
+    style_stack.append((len(text), Tag(Style.normalize(tag.name), tag.parameters)))
+
+
+def _finalize_markup_spans(text: Any, style_stack: List[Tuple[int, Tag]], spans: List[Any]) -> None:
+    text_length = len(text)
+    for start, tag in style_stack:
+        span_style = str(tag)
+        if span_style:
+            spans.append(make_span(start, text_length, span_style))
+    text.spans = sorted(spans[::-1], key=attrgetter("start"))
+
+
+def render_console_markup(
     markup: str,
     style: Union[str, Style] = "",
     emoji: bool = True,
     emoji_variant: Optional[EmojiVariant] = None,
-) -> Text:
-    """Render console markup in to a Text instance.
-
-    Args:
-        markup (str): A string containing console markup.
-        style: (Union[str, Style]): The style to use.
-        emoji (bool, optional): Also render emoji code. Defaults to True.
-        emoji_variant (str, optional): Optional emoji variant, either "text" or "emoji". Defaults to None.
-
-
-    Raises:
-        MarkupError: If there is a syntax error in the markup.
-
-    Returns:
-        Text: A test instance.
-    """
-    emoji_replace = _emoji_replace
+) -> Any:
+    """Render console markup in to a Text instance."""
     if "[" not in markup:
-        return Text(
-            emoji_replace(markup, default_variant=emoji_variant) if emoji else markup,
-            style=style,
-        )
-    text = Text(style=style)
-    append = text.append
-    normalize = Style.normalize
+        return _render_unmarked(markup, style, emoji, emoji_variant)
 
+    text = text_create(style=style)
     style_stack: List[Tuple[int, Tag]] = []
-    pop = style_stack.pop
-
-    spans: List[Span] = []
-    append_span = spans.append
-
-    _Span = Span
-    _Tag = Tag
-
-    def pop_style(style_name: str) -> Tuple[int, Tag]:
-        """Pop tag matching given style name."""
-        for index, (_, tag) in enumerate(reversed(style_stack), 1):
-            if tag.name == style_name:
-                return pop(-index)
-        raise KeyError(style_name)
+    spans: List[Any] = []
 
     for position, plain_text, tag in _parse(markup):
-        if plain_text is not None:
-            # Handle open brace escapes, where the brace is not part of a tag.
-            plain_text = plain_text.replace("\\[", "[")
-            append(emoji_replace(plain_text) if emoji else plain_text)
-        elif tag is not None:
-            if tag.name.startswith("/"):  # Closing tag
-                style_name = tag.name[1:].strip()
+        _apply_markup_token(position, plain_text, tag, text, style_stack, spans, emoji)
 
-                if style_name:  # explicit close
-                    style_name = normalize(style_name)
-                    try:
-                        start, open_tag = pop_style(style_name)
-                    except KeyError:
-                        raise MarkupError(
-                            f"closing tag '{tag.markup}' at position {position} doesn't match any open tag"
-                        ) from None
-                else:  # implicit close
-                    try:
-                        start, open_tag = pop()
-                    except IndexError:
-                        raise MarkupError(
-                            f"closing tag '[/]' at position {position} has nothing to close"
-                        ) from None
-
-                if open_tag.name.startswith("@"):
-                    if open_tag.parameters:
-                        handler_name = ""
-                        parameters = open_tag.parameters.strip()
-                        handler_match = RE_HANDLER.match(parameters)
-                        if handler_match is not None:
-                            handler_name, match_parameters = handler_match.groups()
-                            parameters = (
-                                "()" if match_parameters is None else match_parameters
-                            )
-
-                        try:
-                            meta_params = literal_eval(parameters)
-                        except SyntaxError as error:
-                            raise MarkupError(
-                                f"error parsing {parameters!r} in {open_tag.parameters!r}; {error.msg}"
-                            )
-                        except Exception as error:
-                            raise MarkupError(
-                                f"error parsing {open_tag.parameters!r}; {error}"
-                            ) from None
-
-                        if handler_name:
-                            meta_params = (
-                                handler_name,
-                                meta_params
-                                if isinstance(meta_params, tuple)
-                                else (meta_params,),
-                            )
-
-                    else:
-                        meta_params = ()
-
-                    append_span(
-                        _Span(
-                            start, len(text), Style(meta={open_tag.name: meta_params})
-                        )
-                    )
-                else:
-                    append_span(_Span(start, len(text), str(open_tag)))
-
-            else:  # Opening tag
-                normalized_tag = _Tag(normalize(tag.name), tag.parameters)
-                style_stack.append((len(text), normalized_tag))
-
-    text_length = len(text)
-    while style_stack:
-        start, tag = style_stack.pop()
-        style = str(tag)
-        if style:
-            append_span(_Span(start, text_length, style))
-
-    text.spans = sorted(spans[::-1], key=attrgetter("start"))
+    _finalize_markup_spans(text, style_stack, spans)
     return text
 
 
-if __name__ == "__main__":  # pragma: no cover
-    MARKUP = [
-        "[red]Hello World[/red]",
-        "[magenta]Hello [b]World[/b]",
-        "[bold]Bold[italic] bold and italic [/bold]italic[/italic]",
-        "Click [link=https://www.willmcgugan.com]here[/link] to visit my Blog",
-        ":warning-emoji: [bold red blink] DANGER![/]",
-    ]
+render = render_console_markup
 
-    from rich import print
-    from rich.table import Table
+from ._highlight_bridge import configure_markup
 
-    grid = Table("Markup", "Result", padding=(0, 1))
-
-    for markup in MARKUP:
-        grid.add_row(Text(markup), markup)
-
-    print(grid)
+configure_markup(render_console_markup, escape)

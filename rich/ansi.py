@@ -1,11 +1,9 @@
 import re
 import sys
 from contextlib import suppress
-from typing import Iterable, NamedTuple, Optional
+from typing import Callable, Iterable, Iterator, NamedTuple, Optional, Tuple
 
-from .color import Color
-from .style import Style
-from .text import Text
+from ._highlight_bridge import text_create
 
 re_ansi = re.compile(
     r"""
@@ -117,13 +115,107 @@ SGR_STYLE_MAP = {
 }
 
 
+def _parse_sgr_codes(sgr: str) -> Iterator[int]:
+    for _code in sgr.split(";"):
+        if _code.isdigit() or _code == "":
+            yield min(255, int(_code) if _code else 0)
+
+
+def _apply_foreground_color(
+    style, color_type: int, iter_codes: Iterator[int]
+):
+    from .color import Color
+    from .style import Style
+
+    from_ansi = Color.from_ansi
+    from_rgb = Color.from_rgb
+    if color_type == 5:
+        with suppress(StopIteration):
+            return style + Style.from_color(from_ansi(next(iter_codes)))
+    if color_type == 2:
+        with suppress(StopIteration):
+            return style + Style.from_color(
+                from_rgb(next(iter_codes), next(iter_codes), next(iter_codes))
+            )
+    return style
+
+
+def _apply_background_color(
+    style, color_type: int, iter_codes: Iterator[int]
+):
+    from .color import Color
+    from .style import Style
+
+    from_ansi = Color.from_ansi
+    from_rgb = Color.from_rgb
+    if color_type == 5:
+        with suppress(StopIteration):
+            return style + Style.from_color(None, from_ansi(next(iter_codes)))
+    if color_type == 2:
+        with suppress(StopIteration):
+            return style + Style.from_color(
+                None,
+                from_rgb(next(iter_codes), next(iter_codes), next(iter_codes)),
+            )
+    return style
+
+
+def _apply_sgr_code(style, code: int, iter_codes: Iterator[int]):
+    from .style import Style
+    if code == 0:
+        return Style.null()
+    if code in SGR_STYLE_MAP:
+        return style + Style.parse(SGR_STYLE_MAP[code])
+    if code == 38:
+        with suppress(StopIteration):
+            return _apply_foreground_color(style, next(iter_codes), iter_codes)
+    if code == 48:
+        with suppress(StopIteration):
+            return _apply_background_color(style, next(iter_codes), iter_codes)
+    return style
+
+
+def _apply_sgr(style, sgr: str):
+    iter_codes = iter(_parse_sgr_codes(sgr))
+    for code in iter_codes:
+        style = _apply_sgr_code(style, code, iter_codes)
+    return style
+
+
+def _apply_osc(style, osc: str):
+    if not osc.startswith("8;"):
+        return style
+    _params, semicolon, link = osc[2:].partition(";")
+    if semicolon:
+        return style.update_link(link or None)
+    return style
+
+
+def decode_ansi_tokens(
+    tokens: Iterable[Tuple[str, Optional[str], Optional[str]]],
+    append: Callable[..., None],
+    style,
+):
+    """Apply ANSI tokens to a Text append callback, returning the final style."""
+    for plain_text, sgr, osc in tokens:
+        if plain_text:
+            append(plain_text, style or None)
+        elif osc is not None:
+            style = _apply_osc(style, osc)
+        elif sgr is not None:
+            style = _apply_sgr(style, sgr)
+    return style
+
+
 class AnsiDecoder:
     """Translate ANSI code in to styled Text."""
 
     def __init__(self) -> None:
+        from .style import Style
+
         self.style = Style.null()
 
-    def decode(self, terminal_text: str) -> Iterable[Text]:
+    def decode(self, terminal_text: str) -> Iterable["Text"]:
         """Decode ANSI codes in an iterable of lines.
 
         Args:
@@ -135,7 +227,7 @@ class AnsiDecoder:
         for line in re.split(r"(?<=\n)", terminal_text):
             yield self.decode_line(line.rstrip("\n"))
 
-    def decode_line(self, line: str) -> Text:
+    def decode_line(self, line: str) -> "Text":
         """Decode a line containing ansi codes.
 
         Args:
@@ -144,71 +236,19 @@ class AnsiDecoder:
         Returns:
             Text: A Text instance marked up according to ansi codes.
         """
-        from_ansi = Color.from_ansi
-        from_rgb = Color.from_rgb
-        _Style = Style
-        text = Text()
-        append = text.append
+        text = text_create()
         line = line.rsplit("\r", 1)[-1]
-        for plain_text, sgr, osc in _ansi_tokenize(line):
-            if plain_text:
-                append(plain_text, self.style or None)
-            elif osc is not None:
-                if osc.startswith("8;"):
-                    _params, semicolon, link = osc[2:].partition(";")
-                    if semicolon:
-                        self.style = self.style.update_link(link or None)
-            elif sgr is not None:
-                # Translate in to semi-colon separated codes
-                # Ignore invalid codes, because we want to be lenient
-                codes = [
-                    min(255, int(_code) if _code else 0)
-                    for _code in sgr.split(";")
-                    if _code.isdigit() or _code == ""
-                ]
-                iter_codes = iter(codes)
-                for code in iter_codes:
-                    if code == 0:
-                        # reset
-                        self.style = _Style.null()
-                    elif code in SGR_STYLE_MAP:
-                        # styles
-                        self.style += _Style.parse(SGR_STYLE_MAP[code])
-                    elif code == 38:
-                        #  Foreground
-                        with suppress(StopIteration):
-                            color_type = next(iter_codes)
-                            if color_type == 5:
-                                self.style += _Style.from_color(
-                                    from_ansi(next(iter_codes))
-                                )
-                            elif color_type == 2:
-                                self.style += _Style.from_color(
-                                    from_rgb(
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                    )
-                                )
-                    elif code == 48:
-                        # Background
-                        with suppress(StopIteration):
-                            color_type = next(iter_codes)
-                            if color_type == 5:
-                                self.style += _Style.from_color(
-                                    None, from_ansi(next(iter_codes))
-                                )
-                            elif color_type == 2:
-                                self.style += _Style.from_color(
-                                    None,
-                                    from_rgb(
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                    ),
-                                )
-
+        self.style = decode_ansi_tokens(_ansi_tokenize(line), text.append, self.style)
         return text
+
+
+def ansi_example_read(fd: int, stdout) -> bytes:
+    """Read from a file descriptor into stdout buffer (PTY demo helper)."""
+    import os
+
+    data = os.read(fd, 1024)
+    stdout.write(data)
+    return data
 
 
 if sys.platform != "win32" and __name__ == "__main__":  # pragma: no cover
@@ -221,21 +261,7 @@ if sys.platform != "win32" and __name__ == "__main__":  # pragma: no cover
 
     stdout = io.BytesIO()
 
-    def read(fd: int) -> bytes:
-        data = os.read(fd, 1024)
-        stdout.write(data)
-        return data
+    pty.spawn(sys.argv[1:], ansi_example_read)
 
-    pty.spawn(sys.argv[1:], read)
-
-    from .console import Console
-
-    console = Console(record=True)
-
-    stdout_result = stdout.getvalue().decode("utf-8")
-    print(stdout_result)
-
-    for line in decoder.decode(stdout_result):
-        console.print(line)
-
-    console.save_html("stdout.html")
+if __name__ == "__main__":  # pragma: no cover
+    pass

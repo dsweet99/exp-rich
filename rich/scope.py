@@ -1,27 +1,9 @@
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
 
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
-from .table import Table
-from .text import Text, TextType
+TextType = Union[str, Any]
 
-if TYPE_CHECKING:
-    from .console import ConsoleRenderable, OverflowMethod
-
-
-def render_scope(
-    scope: "Mapping[str, Any]",
-    *,
-    title: Optional[TextType] = None,
-    sort_keys: bool = True,
-    indent_guides: bool = False,
-    max_length: Optional[int] = None,
-    max_string: Optional[int] = None,
-    max_depth: Optional[int] = None,
-    overflow: Optional["OverflowMethod"] = None,
-) -> "ConsoleRenderable":
+def render_scope(scope: 'Mapping[str, Any]', *, title: Optional[TextType]=None, sort_keys: bool=True, indent_guides: bool=False, max_length: Optional[int]=None, max_string: Optional[int]=None, max_depth: Optional[int]=None, overflow: Optional['OverflowMethod']=None) -> 'ConsoleRenderable':
     """Render python variables in a given scope.
 
     Args:
@@ -38,55 +20,24 @@ def render_scope(
     Returns:
         ConsoleRenderable: A renderable object.
     """
+    from ._runtime import get_panel_class, get_pretty_class, get_table_class, get_text_class
+    from .highlighter import ReprHighlighter
+
+    Panel = get_panel_class()
+    Text = get_text_class()
+    Table = get_table_class()
+    Pretty = get_pretty_class()
     highlighter = ReprHighlighter()
     items_table = Table.grid(padding=(0, 1), expand=False)
-    items_table.add_column(justify="right")
+    items_table.add_column(justify='right')
 
     def sort_items(item: Tuple[str, Any]) -> Tuple[bool, str]:
         """Sort special variables first, then alphabetically."""
         key, _ = item
-        return (not key.startswith("__"), key.lower())
+        return (not key.startswith('__'), key.lower())
 
     items = sorted(scope.items(), key=sort_items) if sort_keys else scope.items()
     for key, value in items:
-        key_text = Text.assemble(
-            (key, "scope.key.special" if key.startswith("__") else "scope.key"),
-            (" =", "scope.equals"),
-        )
-        items_table.add_row(
-            key_text,
-            Pretty(
-                value,
-                highlighter=highlighter,
-                indent_guides=indent_guides,
-                max_length=max_length,
-                max_string=max_string,
-                max_depth=max_depth,
-                overflow=overflow,
-            ),
-        )
-    return Panel.fit(
-        items_table,
-        title=title,
-        border_style="scope.border",
-        padding=(0, 1),
-    )
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-
-    print()
-
-    def test(foo: float, bar: float) -> None:
-        list_of_things = [1, 2, 3, None, 4, True, False, "Hello World"]
-        dict_of_things = {
-            "version": "1.1",
-            "method": "confirmFruitPurchase",
-            "params": [["apple", "orange", "mangoes", "pomelo"], 1.123],
-            "id": "194521489",
-        }
-        print(render_scope(locals(), title="[i]locals", sort_keys=False))
-
-    test(20.3423, 3.1427)
-    print()
+        key_text = Text.assemble((key, 'scope.key.special' if key.startswith('__') else 'scope.key'), (' =', 'scope.equals'))
+        items_table.add_row(key_text, Pretty(value, highlighter=highlighter, indent_guides=indent_guides, max_length=max_length, max_string=max_string, max_depth=max_depth, overflow=overflow))
+    return Panel.fit(items_table, title=title, border_style='scope.border', padding=(0, 1))

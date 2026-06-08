@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import IntEnum
 from functools import lru_cache
 from itertools import filterfalse
@@ -23,10 +25,9 @@ from .cells import (
     set_cell_size,
 )
 from .repr import Result, rich_repr
-from .style import Style
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
+    from .style import Style
 
 
 class ControlType(IntEnum):
@@ -245,63 +246,19 @@ class Segment(NamedTuple):
 
     @classmethod
     def split_lines(cls, segments: Iterable["Segment"]) -> Iterable[List["Segment"]]:
-        """Split a sequence of segments in to a list of lines.
+        """Split a sequence of segments in to a list of lines."""
+        from ._segment_lines import split_segments_into_lines
 
-        Args:
-            segments (Iterable[Segment]): Segments potentially containing line feeds.
-
-        Yields:
-            Iterable[List[Segment]]: Iterable of segment lists, one per line.
-        """
-        line: List[Segment] = []
-        append = line.append
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield line
-                        line = []
-                        append = line.append
-            else:
-                append(segment)
-        if line:
-            yield line
+        yield from split_segments_into_lines(cls, segments)
 
     @classmethod
     def split_lines_terminator(
         cls, segments: Iterable["Segment"]
     ) -> Iterable[Tuple[List["Segment"], bool]]:
-        """Split a sequence of segments in to a list of lines and a boolean to indicate if there was a new line.
+        """Split segments into lines and report whether each line ended with a newline."""
+        from ._segment_lines import split_segments_with_terminator
 
-        Args:
-            segments (Iterable[Segment]): Segments potentially containing line feeds.
-
-        Yields:
-            Iterable[List[Segment]]: Iterable of segment lists, one per line.
-        """
-        line: List[Segment] = []
-        append = line.append
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield (line, True)
-                        line = []
-                        append = line.append
-            else:
-                append(segment)
-        if line:
-            yield (line, False)
+        yield from split_segments_with_terminator(cls, segments)
 
     @classmethod
     def split_and_crop_lines(
@@ -324,31 +281,11 @@ class Segment(NamedTuple):
         Returns:
             Iterable[List[Segment]]: An iterable of lines of segments.
         """
-        line: List[Segment] = []
-        append = line.append
+        from ._segment_lines import split_and_crop_segment_lines
 
-        adjust_line_length = cls.adjust_line_length
-        new_line_segment = cls("\n")
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, segment_style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, segment_style))
-                    if new_line:
-                        cropped_line = adjust_line_length(
-                            line, length, style=style, pad=pad
-                        )
-                        if include_new_lines:
-                            cropped_line.append(new_line_segment)
-                        yield cropped_line
-                        line.clear()
-            else:
-                append(segment)
-        if line:
-            yield adjust_line_length(line, length, style=style, pad=pad)
+        yield from split_and_crop_segment_lines(
+            cls, segments, length, style=style, pad=pad, include_new_lines=include_new_lines
+        )
 
     @classmethod
     def adjust_line_length(
@@ -369,31 +306,9 @@ class Segment(NamedTuple):
         Returns:
             List[Segment]: A line of segments with the desired length.
         """
-        line_length = sum(segment.cell_length for segment in line)
-        new_line: List[Segment]
+        from ._segment_lines import adjust_segment_line_length
 
-        if line_length < length:
-            if pad:
-                new_line = line + [cls(" " * (length - line_length), style)]
-            else:
-                new_line = line[:]
-        elif line_length > length:
-            new_line = []
-            append = new_line.append
-            line_length = 0
-            for segment in line:
-                segment_length = segment.cell_length
-                if line_length + segment_length < length or segment.control:
-                    append(segment)
-                    line_length += segment_length
-                else:
-                    text, segment_style, _ = segment
-                    text = set_cell_size(text, length - line_length)
-                    append(cls(text, segment_style))
-                    break
-        else:
-            new_line = line[:]
-        return new_line
+        return adjust_segment_line_length(cls, line, length, style=style, pad=pad)
 
     @classmethod
     def get_line_length(cls, line: List["Segment"]) -> int:
@@ -630,70 +545,10 @@ class Segment(NamedTuple):
     def divide(
         cls, segments: Iterable["Segment"], cuts: Iterable[int]
     ) -> Iterable[List["Segment"]]:
-        """Divides an iterable of segments in to portions.
+        """Divides an iterable of segments in to portions."""
+        from ._segment_divide import divide_segments_at_cuts
 
-        Args:
-            cuts (Iterable[int]): Cell positions where to divide.
-
-        Yields:
-            [Iterable[List[Segment]]]: An iterable of Segments in List.
-        """
-        split_segments: List["Segment"] = []
-        add_segment = split_segments.append
-
-        iter_cuts = iter(cuts)
-
-        while True:
-            cut = next(iter_cuts, -1)
-            if cut == -1:
-                return
-            if cut != 0:
-                break
-            yield []
-        pos = 0
-
-        segments_clear = split_segments.clear
-        segments_copy = split_segments.copy
-
-        _cell_len = cached_cell_len
-        for segment in segments:
-            text, _style, control = segment
-            while text:
-                end_pos = pos if control else pos + _cell_len(text)
-                if end_pos < cut:
-                    add_segment(segment)
-                    pos = end_pos
-                    break
-
-                if end_pos == cut:
-                    add_segment(segment)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = end_pos
-
-                    cut = next(iter_cuts, -1)
-                    if cut == -1:
-                        if split_segments:
-                            yield segments_copy()
-                        return
-
-                    break
-
-                else:
-                    before, segment = segment.split_cells(cut - pos)
-                    text, _style, control = segment
-                    add_segment(before)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = cut
-
-                cut = next(iter_cuts, -1)
-                if cut == -1:
-                    if split_segments:
-                        yield segments_copy()
-                    return
-
-        yield segments_copy()
+        yield from divide_segments_at_cuts(segments, cuts)
 
 
 class Segments:
@@ -747,34 +602,4 @@ class SegmentLines:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
-    from rich.syntax import Syntax
-    from rich.text import Text
-
-    code = """from rich.console import Console
-console = Console()
-text = Text.from_markup("Hello, [bold magenta]World[/]!")
-console.print(text)"""
-
-    text = Text.from_markup("Hello, [bold magenta]World[/]!")
-
-    console = Console()
-
-    console.rule("rich.Segment")
-    console.print(
-        "A Segment is the last step in the Rich render process before generating text with ANSI codes."
-    )
-    console.print("\nConsider the following code:\n")
-    console.print(Syntax(code, "python", line_numbers=True))
-    console.print()
-    console.print(
-        "When you call [b]print()[/b], Rich [i]renders[/i] the object in to the following:\n"
-    )
-    fragments = list(console.render(text))
-    console.print(fragments)
-    console.print()
-    console.print("The Segments are then processed to produce the following output:\n")
-    console.print(text)
-    console.print(
-        "\nYou will only need to know this if you are implementing your own Rich renderables."
-    )
+    pass

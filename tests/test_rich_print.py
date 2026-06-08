@@ -15,6 +15,20 @@ def test_reconfigure_console():
     assert rich.get_console().width == 100
 
 
+def test_rich_imported_print_symbols():
+    from rich import print, print_json
+
+    console = Console(file=io.StringIO())
+    backup_file = rich.get_console().file
+    try:
+        rich.get_console().file = console.file
+        print("kiss")
+        print_json(data={"kiss": True})
+        assert "kiss" in console.file.getvalue()
+    finally:
+        rich.get_console().file = backup_file
+
+
 def test_rich_print():
     console = rich.get_console()
     output = io.StringIO()

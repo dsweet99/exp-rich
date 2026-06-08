@@ -38,4 +38,5 @@ DIVIDES = [
     (2**32, 2**16),
 ]
 
-divide_all(DIVIDES)
+if __name__ == "__main__":
+    divide_all(DIVIDES)

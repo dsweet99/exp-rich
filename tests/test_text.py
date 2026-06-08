@@ -7,7 +7,17 @@ import pytest
 from rich.console import Console, Group
 from rich.measure import Measurement
 from rich.style import Style
-from rich.text import Span, Text
+from rich.text import (
+    Span,
+    Text,
+    assign_spans_to_divided_lines,
+    build_indent_guide_lines,
+    expand_tab_line,
+    render_spanned_text,
+    text_at_offset,
+    wrap_text,
+    wrap_text_line,
+)
 
 
 def test_span():
@@ -15,6 +25,11 @@ def test_span():
     repr(span)
     assert bool(span)
     assert not Span(10, 10, "foo")
+
+
+def test_span_extend():
+    assert Span(5, 10, "foo").extend(2) == Span(5, 12, "foo")
+    assert Span(5, 10, "foo").extend(0) == Span(5, 10, "foo")
 
 
 def test_span_split():
@@ -403,6 +418,14 @@ def test_split_spans():
     assert lines[1].spans == [Span(0, 5, "red"), Span(0, 5, "bold")]
 
 
+def _assert_divide_single_style(text, cuts, expected_strings, expected_spans):
+    lines = text.divide(cuts)
+    assert len(lines) == len(expected_strings)
+    for line, expected, spans in zip(lines, expected_strings, expected_spans):
+        assert str(line) == expected
+        assert line._spans == spans
+
+
 def test_divide():
     lines = Text("foo").divide([])
     assert len(lines) == 1
@@ -410,40 +433,35 @@ def test_divide():
 
     text = Text()
     text.append("foo", "bold")
-    lines = text.divide([1, 2])
-    assert len(lines) == 3
-    assert str(lines[0]) == "f"
-    assert str(lines[1]) == "o"
-    assert str(lines[2]) == "o"
-    assert lines[0]._spans == [Span(0, 1, "bold")]
-    assert lines[1]._spans == [Span(0, 1, "bold")]
-    assert lines[2]._spans == [Span(0, 1, "bold")]
+    _assert_divide_single_style(
+        text,
+        [1, 2],
+        ["f", "o", "o"],
+        [[Span(0, 1, "bold")]] * 3,
+    )
 
     text = Text()
     text.append("foo", "red")
     text.append("bar", "green")
     text.append("baz", "blue")
-    lines = text.divide([8])
-    assert len(lines) == 2
-    assert str(lines[0]) == "foobarba"
-    assert str(lines[1]) == "z"
-    assert lines[0]._spans == [
-        Span(0, 3, "red"),
-        Span(3, 6, "green"),
-        Span(6, 8, "blue"),
-    ]
-    assert lines[1]._spans == [Span(0, 1, "blue")]
-
-    lines = text.divide([1])
-    assert len(lines) == 2
-    assert str(lines[0]) == "f"
-    assert str(lines[1]) == "oobarbaz"
-    assert lines[0]._spans == [Span(0, 1, "red")]
-    assert lines[1]._spans == [
-        Span(0, 2, "red"),
-        Span(2, 5, "green"),
-        Span(5, 8, "blue"),
-    ]
+    _assert_divide_single_style(
+        text,
+        [8],
+        ["foobarba", "z"],
+        [
+            [Span(0, 3, "red"), Span(3, 6, "green"), Span(6, 8, "blue")],
+            [Span(0, 1, "blue")],
+        ],
+    )
+    _assert_divide_single_style(
+        text,
+        [1],
+        ["f", "oobarbaz"],
+        [
+            [Span(0, 1, "red")],
+            [Span(0, 2, "red"), Span(2, 5, "green"), Span(5, 8, "blue")],
+        ],
+    )
 
 
 def test_right_crop():
@@ -676,6 +694,50 @@ def test_wrap_tabs():
     assert len(lines) == 2
     assert str(lines[0]) == "foo "
     assert str(lines[1]) == "bar "
+
+
+def test_text_helper_functions():
+    console = Console(width=20)
+    text = Text("hello\tworld", style="red")
+    expanded = expand_tab_line(text, 4, Text)
+    assert expanded
+    assert Text("").join(expanded).plain == "hello   world"
+
+    styled = Text("ab", spans=[Span(0, 2, "bold")])
+    segments = list(
+        render_spanned_text(
+            styled.plain,
+            styled._spans,
+            console.get_style,
+            styled.style,
+        )
+    )
+    assert segments
+
+    divided = Text("abcdef", spans=[Span(0, 6, "bold")])
+    line_ranges = [(0, 3), (3, 6)]
+    lines = [Text("abc"), Text("def")]
+    assign_spans_to_divided_lines(
+        divided._spans, line_ranges, [line._spans.append for line in lines]
+    )
+    assert lines[0]._spans
+
+    assert text_at_offset(Text("xy", spans=[Span(0, 1, "red")]), 0, Text).plain == "x"
+
+    guides = build_indent_guide_lines(Text("  a\n"), 2, "│", "dim", Text)
+    assert "│" in guides[0].plain
+
+    wrapped = wrap_text(Text("hello world"), console, 5)
+    assert len(wrapped) >= 2
+    assert wrap_text_line(
+        Text("hi"),
+        console,
+        10,
+        wrap_justify="left",
+        wrap_overflow="fold",
+        tab_size=4,
+        no_wrap=True,
+    )
 
 
 def test_render():

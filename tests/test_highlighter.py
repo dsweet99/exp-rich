@@ -4,6 +4,22 @@ from typing import List
 
 import pytest
 
+from rich._highlight_bridge import (
+    align_panel_border_label,
+    configure,
+    configure_markup,
+    configure_panel,
+    copy_text,
+    escape_markup,
+    is_text,
+    make_span,
+    invoke_markup_render,
+    normalize_panel_label,
+    text_create,
+    text_from_str,
+)
+from rich.console import Console
+from rich.panel import Panel
 from rich.highlighter import (
     ISO8601Highlighter,
     JSONHighlighter,
@@ -11,6 +27,85 @@ from rich.highlighter import (
     ReprHighlighter,
 )
 from rich.text import Span, Text
+
+
+def test_highlight_bridge():
+    configure(Text, Text.copy, Span)
+    created = text_from_str("hello")
+    assert created.plain == "hello"
+    copied = copy_text(Text("x"))
+    assert copied.plain == "x"
+    assert is_text(Text("y"))
+    assert not is_text("z")
+    styled = text_create("plain", style="bold")
+    assert styled.plain == "plain"
+    span = make_span(0, 3, "bold")
+    assert span == Span(0, 3, "bold")
+
+
+def test_markup_bridge():
+    import rich.markup as markup_module
+
+    configure_markup(markup_module.render, markup_module.escape)
+    rendered = invoke_markup_render("[bold]hi[/bold]")
+    assert rendered.plain == "hi"
+    assert markup_module.render("no tags", style="dim").plain == "no tags"
+    assert escape_markup("plain") == "plain"
+    assert Text.from_markup("[green]ok[/green]").plain == "ok"
+    assert Text("x", style="bold").markup == "[bold]x[/bold]"
+
+
+def test_panel_bridge():
+    import rich.text as text_module
+
+    configure_panel(
+        text_module._normalize_panel_label,
+        text_module._align_panel_border_label,
+    )
+    label = normalize_panel_label("hello")
+    assert label.plain == " hello "
+    console = Console(width=40, record=True)
+    aligned = align_panel_border_label(console, label, 10, "center", "-", "bold")
+    assert aligned.plain
+    panel = Panel("body", title="Title")
+    console.print(panel)
+    assert "Title" in console.export_text()
+
+
+def test_panel_bridge_unconfigured():
+    import rich._highlight_bridge as bridge
+
+    saved = (
+        bridge._normalize_panel_label,
+        bridge._align_panel_border_label,
+    )
+    bridge._normalize_panel_label = None
+    bridge._align_panel_border_label = None
+    try:
+        with pytest.raises(RuntimeError, match="rich.text has not registered"):
+            normalize_panel_label("x")
+        with pytest.raises(RuntimeError, match="rich.text has not registered"):
+            align_panel_border_label(Console(), Text("x"), 5, "left", "-", "bold")
+    finally:
+        bridge._normalize_panel_label, bridge._align_panel_border_label = saved
+
+
+def test_markup_bridge_unconfigured():
+    import rich._highlight_bridge as bridge
+
+    saved = (
+        bridge._render_markup,
+        bridge._escape_markup,
+    )
+    bridge._render_markup = None
+    bridge._escape_markup = None
+    try:
+        with pytest.raises(RuntimeError, match="rich.markup has not registered"):
+            invoke_markup_render("plain")
+        with pytest.raises(RuntimeError, match="rich.markup has not registered"):
+            escape_markup("plain")
+    finally:
+        bridge._render_markup, bridge._escape_markup = saved
 
 
 def test_wrong_type():

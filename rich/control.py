@@ -1,21 +1,11 @@
 import time
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Union, Final
 
+from ._control_strip import STRIP_CONTROL_CODES, strip_control_codes
 from .segment import ControlCode, ControlType, Segment
 
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderResult
-
-STRIP_CONTROL_CODES: Final = [
-    7,  # Bell
-    8,  # Backspace
-    11,  # Vertical tab
-    12,  # Form feed
-    13,  # Carriage return
-]
-_CONTROL_STRIP_TRANSLATE: Final = {
-    _codepoint: None for _codepoint in STRIP_CONTROL_CODES
-}
 
 CONTROL_ESCAPE: Final = {
     7: "\\a",
@@ -178,20 +168,6 @@ class Control:
             yield self.segment
 
 
-def strip_control_codes(
-    text: str, _translate_table: Dict[int, None] = _CONTROL_STRIP_TRANSLATE
-) -> str:
-    """Remove control codes from text.
-
-    Args:
-        text (str): A string possibly contain control codes.
-
-    Returns:
-        str: String with control codes removed.
-    """
-    return text.translate(_translate_table)
-
-
 def escape_control_codes(
     text: str,
     _translate_table: Dict[int, str] = CONTROL_ESCAPE,
@@ -209,9 +185,9 @@ def escape_control_codes(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+    from ._runtime import get_console_class
 
-    console = Console()
+    console = get_console_class()()
     console.print("Look at the title of your terminal window ^")
     # console.print(Control((ControlType.SET_WINDOW_TITLE, "Hello, world!")))
     for i in range(10):

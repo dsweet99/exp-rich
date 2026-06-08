@@ -165,12 +165,13 @@ from time import sleep
 
 from rich.live import Live
 
-with Live(layout, refresh_per_second=10, screen=True):
-    while not overall_progress.finished:
-        sleep(0.1)
-        for job in job_progress.tasks:
-            if not job.finished:
-                job_progress.advance(job.id)
+if __name__ == "__main__":
+    with Live(layout, refresh_per_second=10, screen=True):
+        while not overall_progress.finished:
+            sleep(0.1)
+            for job in job_progress.tasks:
+                if not job.finished:
+                    job_progress.advance(job.id)
 
-        completed = sum(task.completed for task in job_progress.tasks)
-        overall_progress.update(overall_task, completed=completed)
+            completed = sum(task.completed for task in job_progress.tasks)
+            overall_progress.update(overall_task, completed=completed)

@@ -1,17 +1,43 @@
 from datetime import datetime
-from typing import Iterable, List, Optional, TYPE_CHECKING, Union, Callable
+from typing import Any, Callable, Iterable, List, Optional, Union
+
+from ._log_types import FormatTimeCallable
+from ._runtime import get_table_class, get_text_class
+
+TextType = Union[str, Any]
 
 
-from .text import Text, TextType
+def _format_log_time(
+    console: "Console",
+    log_time: Optional[datetime],
+    time_format: Optional[Union[str, FormatTimeCallable]],
+    default_time_format: Union[str, FormatTimeCallable],
+) -> Any:
+    Text = get_text_class()
 
-if TYPE_CHECKING:
-    from .console import Console, ConsoleRenderable, RenderableType
-    from .table import Table
+    log_time = log_time or console.get_datetime()
+    time_format = time_format or default_time_format
+    if callable(time_format):
+        return time_format(log_time)
+    return Text(log_time.strftime(time_format))
 
-FormatTimeCallable = Callable[[datetime], Text]
+
+def _build_path_text(path: str, line_no: Optional[int], link_path: Optional[str]) -> Any:
+    Text = get_text_class()
+
+    path_text = Text()
+    path_text.append(path, style=f"link file://{link_path}" if link_path else "")
+    if line_no:
+        path_text.append(":")
+        path_text.append(
+            f"{line_no}",
+            style=f"link file://{link_path}#{line_no}" if link_path else "",
+        )
+    return path_text
 
 
 class LogRender:
+
     def __init__(
         self,
         show_time: bool = True,
@@ -27,7 +53,25 @@ class LogRender:
         self.time_format = time_format
         self.omit_repeated_times = omit_repeated_times
         self.level_width = level_width
-        self._last_time: Optional[Text] = None
+        self._last_time: Optional[Any] = None
+
+    def _append_time_column(
+        self,
+        row: List["RenderableType"],
+        console: "Console",
+        log_time: Optional[datetime],
+        time_format: Optional[Union[str, FormatTimeCallable]],
+    ) -> None:
+        Text = get_text_class()
+
+        log_time_display = _format_log_time(
+            console, log_time, time_format, self.time_format
+        )
+        if log_time_display == self._last_time and self.omit_repeated_times:
+            row.append(Text(" " * len(log_time_display)))
+        else:
+            row.append(log_time_display)
+            self._last_time = log_time_display
 
     def __call__(
         self,
@@ -39,9 +83,11 @@ class LogRender:
         path: Optional[str] = None,
         line_no: Optional[int] = None,
         link_path: Optional[str] = None,
-    ) -> "Table":
-        from .containers import Renderables
-        from .table import Table
+    ) -> Any:
+        from ._runtime import _mod
+
+        Renderables = _mod("rich.containers").Renderables
+        Table = get_table_class()
 
         output = Table.grid(padding=(0, 1))
         output.expand = True
@@ -54,41 +100,11 @@ class LogRender:
             output.add_column(style="log.path")
         row: List["RenderableType"] = []
         if self.show_time:
-            log_time = log_time or console.get_datetime()
-            time_format = time_format or self.time_format
-            if callable(time_format):
-                log_time_display = time_format(log_time)
-            else:
-                log_time_display = Text(log_time.strftime(time_format))
-            if log_time_display == self._last_time and self.omit_repeated_times:
-                row.append(Text(" " * len(log_time_display)))
-            else:
-                row.append(log_time_display)
-                self._last_time = log_time_display
+            self._append_time_column(row, console, log_time, time_format)
         if self.show_level:
             row.append(level)
-
         row.append(Renderables(renderables))
         if self.show_path and path:
-            path_text = Text()
-            path_text.append(
-                path, style=f"link file://{link_path}" if link_path else ""
-            )
-            if line_no:
-                path_text.append(":")
-                path_text.append(
-                    f"{line_no}",
-                    style=f"link file://{link_path}#{line_no}" if link_path else "",
-                )
-            row.append(path_text)
-
+            row.append(_build_path_text(path, line_no, link_path))
         output.add_row(*row)
         return output
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
-
-    c = Console()
-    c.print("[on blue]Hello", justify="right")
-    c.log("[on blue]hello", justify="right")

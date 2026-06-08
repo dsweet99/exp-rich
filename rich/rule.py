@@ -3,13 +3,13 @@ from typing import Union
 from .align import AlignMethod
 from .cells import cell_len, set_cell_size
 from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
 from .measure import Measurement
 from .style import Style
 from .text import Text
+from ._jupyter_mixin import JupyterMixin
 
 
-class Rule(JupyterMixin):
+class Rule:
     """A console renderable to draw a horizontal rule (line).
 
     Args:
@@ -19,6 +19,7 @@ class Rule(JupyterMixin):
         end (str, optional): Character at end of Rule. defaults to "\\\\n"
         align (str, optional): How to align the title, one of "left", "center", or "right". Defaults to "center".
     """
+
 
     def __init__(
         self,
@@ -46,58 +47,80 @@ class Rule(JupyterMixin):
     def __repr__(self) -> str:
         return f"Rule({self.title!r}, {self.characters!r})"
 
+    def _prepare_title_text(self, console: Console) -> Text:
+        if isinstance(self.title, Text):
+            title_text = self.title
+        else:
+            title_text = console.render_str(self.title, style="rule.text")
+        title_text.plain = title_text.plain.replace("\n", " ")
+        title_text.expand_tabs()
+        return title_text
+
+    def _build_center_rule(
+        self, title_text: Text, characters: str, chars_len: int, width: int, truncate_width: int
+    ) -> Text:
+        title_text.truncate(truncate_width, overflow="ellipsis")
+        side_width = (width - cell_len(title_text.plain)) // 2
+        left = Text(characters * (side_width // chars_len + 1))
+        left.truncate(side_width - 1)
+        right_length = width - cell_len(left.plain) - cell_len(title_text.plain)
+        right = Text(characters * (side_width // chars_len + 1))
+        right.truncate(right_length)
+        rule_text = Text(end=self.end)
+        rule_text.append(left.plain + " ", self.style)
+        rule_text.append(title_text)
+        rule_text.append(" " + right.plain, self.style)
+        return rule_text
+
+    def _build_left_rule(
+        self, title_text: Text, characters: str, width: int, truncate_width: int
+    ) -> Text:
+        title_text.truncate(truncate_width, overflow="ellipsis")
+        rule_text = Text(end=self.end)
+        rule_text.append(title_text)
+        rule_text.append(" ")
+        rule_text.append(characters * (width - rule_text.cell_len), self.style)
+        return rule_text
+
+    def _build_right_rule(
+        self, title_text: Text, characters: str, width: int, truncate_width: int
+    ) -> Text:
+        title_text.truncate(truncate_width, overflow="ellipsis")
+        rule_text = Text(end=self.end)
+        rule_text.append(characters * (width - title_text.cell_len - 1), self.style)
+        rule_text.append(" ")
+        rule_text.append(title_text)
+        return rule_text
+
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
         width = options.max_width
-
         characters = (
             "-"
             if (options.ascii_only and not self.characters.isascii())
             else self.characters
         )
-
         chars_len = cell_len(characters)
         if not self.title:
             yield self._rule_line(chars_len, width)
             return
 
-        if isinstance(self.title, Text):
-            title_text = self.title
-        else:
-            title_text = console.render_str(self.title, style="rule.text")
-
-        title_text.plain = title_text.plain.replace("\n", " ")
-        title_text.expand_tabs()
-
+        title_text = self._prepare_title_text(console)
         required_space = 4 if self.align == "center" else 2
         truncate_width = max(0, width - required_space)
         if not truncate_width:
             yield self._rule_line(chars_len, width)
             return
 
-        rule_text = Text(end=self.end)
         if self.align == "center":
-            title_text.truncate(truncate_width, overflow="ellipsis")
-            side_width = (width - cell_len(title_text.plain)) // 2
-            left = Text(characters * (side_width // chars_len + 1))
-            left.truncate(side_width - 1)
-            right_length = width - cell_len(left.plain) - cell_len(title_text.plain)
-            right = Text(characters * (side_width // chars_len + 1))
-            right.truncate(right_length)
-            rule_text.append(left.plain + " ", self.style)
-            rule_text.append(title_text)
-            rule_text.append(" " + right.plain, self.style)
+            rule_text = self._build_center_rule(
+                title_text, characters, chars_len, width, truncate_width
+            )
         elif self.align == "left":
-            title_text.truncate(truncate_width, overflow="ellipsis")
-            rule_text.append(title_text)
-            rule_text.append(" ")
-            rule_text.append(characters * (width - rule_text.cell_len), self.style)
-        elif self.align == "right":
-            title_text.truncate(truncate_width, overflow="ellipsis")
-            rule_text.append(characters * (width - title_text.cell_len - 1), self.style)
-            rule_text.append(" ")
-            rule_text.append(title_text)
+            rule_text = self._build_left_rule(title_text, characters, width, truncate_width)
+        else:
+            rule_text = self._build_right_rule(title_text, characters, width, truncate_width)
 
         rule_text.plain = set_cell_size(rule_text.plain, width)
         yield rule_text
@@ -113,18 +136,3 @@ class Rule(JupyterMixin):
     ) -> Measurement:
         return Measurement(1, 1)
 
-
-if __name__ == "__main__":  # pragma: no cover
-    import sys
-
-    from rich.console import Console
-
-    try:
-        text = sys.argv[1]
-    except IndexError:
-        text = "Hello, World"
-    console = Console()
-    console.print(Rule(title=text))
-
-    console = Console()
-    console.print(Rule("foo"), width=4)

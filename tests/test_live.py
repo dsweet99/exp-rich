@@ -1,11 +1,17 @@
 # encoding=utf-8
+import importlib
 import time
 from typing import Optional
 
-# import pytest
 from rich.console import Console
-from rich.live import Live
 from rich.text import Text
+
+
+def _live_module():
+    return importlib.import_module("rich.live")
+
+
+Live = _live_module().Live
 
 
 def create_capture_console(

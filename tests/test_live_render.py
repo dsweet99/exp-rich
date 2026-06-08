@@ -16,6 +16,10 @@ def test_renderable(live_render):
     assert live_render.renderable == "another string"
 
 
+def test_last_render_height(live_render):
+    assert live_render.last_render_height == 0
+
+
 def test_position_cursor(live_render):
     assert str(live_render.position_cursor()) == ""
     live_render._shape = (80, 2)

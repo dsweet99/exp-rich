@@ -3,6 +3,13 @@ from io import StringIO
 import pytest
 
 from rich.cells import cell_len
+from rich._segment_divide import divide_segments_at_cuts
+from rich._segment_lines import (
+    adjust_segment_line_length,
+    split_and_crop_segment_lines,
+    split_segments_into_lines,
+    split_segments_with_terminator,
+)
 from rich.segment import ControlType, Segment, SegmentLines, Segments
 from rich.style import Style
 
@@ -179,6 +186,45 @@ def test_divide():
         [Segment("Hell", bold)],
         [Segment("o", bold), Segment(" World!", italic)],
     ]
+
+
+def test_divide_segments_at_cuts_matches_classmethod():
+    """divide_segments_at_cuts helper should match Segment.divide."""
+    bold = Style(bold=True)
+    segments = [Segment("Hello", bold), Segment(" World!", Style(italic=True))]
+    cuts = [1, 2, 12]
+    assert list(divide_segments_at_cuts(segments, cuts)) == list(
+        Segment.divide(segments, cuts)
+    )
+
+
+def test_split_segment_line_helpers():
+    lines = [Segment("Hello\nWorld")]
+    assert list(split_segments_into_lines(Segment, lines)) == [
+        [Segment("Hello")],
+        [Segment("World")],
+    ]
+    assert list(split_segments_with_terminator(Segment, lines)) == [
+        ([Segment("Hello")], True),
+        ([Segment("World")], False),
+    ]
+
+
+def test_split_and_crop_segment_lines_matches_classmethod():
+    segments = [Segment("Hello\nWorld")]
+    expected = list(Segment.split_and_crop_lines(segments, 4))
+    assert list(split_and_crop_segment_lines(Segment, segments, 4)) == expected
+
+
+def test_adjust_segment_line_length_matches_classmethod():
+    line = [Segment("Hello")]
+    assert adjust_segment_line_length(Segment, line, 10) == Segment.adjust_line_length(
+        line, 10
+    )
+    long_line = [Segment("Hello World")]
+    assert adjust_segment_line_length(Segment, long_line, 5) == Segment.adjust_line_length(
+        long_line, 5
+    )
 
 
 # https://github.com/textualize/rich/issues/1755

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from operator import itemgetter
-from typing import Callable, NamedTuple, Sequence, Tuple
+from typing import Callable, Sequence, Tuple
 
+from rich._cell_table import CellTable
 from rich._unicode_data import load as load_cell_table
 
 CellSpan = Tuple[int, int, int]
@@ -33,14 +34,6 @@ _SINGLE_CELLS = frozenset(
 # When called with a string this will return True if all
 # characters are single-cell, otherwise False
 _is_single_cell_widths: Callable[[str], bool] = _SINGLE_CELLS.issuperset
-
-
-class CellTable(NamedTuple):
-    """Contains unicode data required to measure the cell widths of glyphs."""
-
-    unicode_version: str
-    widths: Sequence[tuple[int, int, int]]
-    narrow_to_wide: frozenset[str]
 
 
 @lru_cache(maxsize=4096)
@@ -110,6 +103,81 @@ def cell_len(text: str, unicode_version: str = "auto") -> int:
     return _cell_len(text, unicode_version)
 
 
+def _cell_len_special_char(
+    character: str,
+    unicode_version: str,
+    last_measured_character: str | None,
+    total_width: int,
+    cell_table: CellTable,
+) -> tuple[str | None, int]:
+    if character_width := get_character_cell_size(character, unicode_version):
+        return character, total_width + character_width
+    return last_measured_character, total_width
+
+
+def _cell_len_special_zwj(index: int) -> int:
+    return index + 1
+
+
+def _cell_len_special_fe0f(
+    last_measured_character: str | None,
+    total_width: int,
+    cell_table: CellTable,
+) -> tuple[str | None, int]:
+    if not last_measured_character:
+        return last_measured_character, total_width
+    total_width += last_measured_character in cell_table.narrow_to_wide
+    return None, total_width
+
+
+def _cell_len_special_step(
+    character: str,
+    index: int,
+    last_measured_character: str | None,
+    total_width: int,
+    unicode_version: str,
+    cell_table: CellTable,
+    special: set[str],
+) -> tuple[int, str | None, int]:
+    if character not in special:
+        return (
+            index,
+            *_cell_len_special_char(
+                character, unicode_version, last_measured_character, total_width, cell_table
+            ),
+        )
+    if character == "\u200d":
+        return _cell_len_special_zwj(index), last_measured_character, total_width
+    return index, *_cell_len_special_fe0f(
+        last_measured_character, total_width, cell_table
+    )
+
+
+def _cell_len_special(
+    text: str,
+    unicode_version: str,
+    cell_table: CellTable,
+) -> int:
+    total_width = 0
+    last_measured_character: str | None = None
+    special = {"\u200d", "\ufe0f"}
+    index = 0
+    character_count = len(text)
+    while index < character_count:
+        character = text[index]
+        index, last_measured_character, total_width = _cell_len_special_step(
+            character,
+            index,
+            last_measured_character,
+            total_width,
+            unicode_version,
+            cell_table,
+            special,
+        )
+        index += 1
+    return total_width
+
+
 def _cell_len(text: str, unicode_version: str) -> int:
     """Get the cell length of a string (length as it appears in the terminal).
 
@@ -133,29 +201,49 @@ def _cell_len(text: str, unicode_version: str) -> int:
         )
 
     cell_table = load_cell_table(unicode_version)
-    total_width = 0
-    last_measured_character: str | None = None
+    return _cell_len_special(text, unicode_version, cell_table)
 
-    SPECIAL = {"\u200d", "\ufe0f"}
 
-    index = 0
-    character_count = len(text)
+def _extend_zero_width_grapheme(
+    spans: list[tuple[int, int, int]], index: int
+) -> int:
+    if spans:
+        start, _end, cell_length = spans[-1]
+        spans[-1] = (start, index := index + 1, cell_length)
+        return index
+    spans.append((index, index := index + 1, 0))
+    return index
 
-    while index < character_count:
-        character = text[index]
-        if character in SPECIAL:
-            if character == "\u200d":
-                index += 1
-            elif last_measured_character:
-                total_width += last_measured_character in cell_table.narrow_to_wide
-                last_measured_character = None
-        else:
-            if character_width := get_character_cell_size(character, unicode_version):
-                last_measured_character = character
-                total_width += character_width
-        index += 1
 
-    return total_width
+def _split_special_grapheme(
+    character: str,
+    index: int,
+    codepoint_count: int,
+    spans: list[tuple[int, int, int]],
+    cell_table: CellTable,
+    last_measured_character: str | None,
+    total_width: int,
+) -> tuple[int, str | None, int]:
+    if not spans:
+        spans.append((index, index := index + 1, 0))
+        return index, last_measured_character, total_width
+    if character == "\u200d":
+        index += 2 if index < (codepoint_count - 1) else 1
+        start, _end, cell_length = spans[-1]
+        spans[-1] = (start, index, cell_length)
+        return index, last_measured_character, total_width
+    index += 1
+    if last_measured_character:
+        start, _end, cell_length = spans[-1]
+        if last_measured_character in cell_table.narrow_to_wide:
+            last_measured_character = None
+            cell_length += 1
+            total_width += 1
+        spans[-1] = (start, index, cell_length)
+    else:
+        start, _end, cell_length = spans[-1]
+        spans[-1] = (start, index, cell_length)
+    return index, last_measured_character, total_width
 
 
 def split_graphemes(
@@ -186,33 +274,15 @@ def split_graphemes(
     SPECIAL = {"\u200d", "\ufe0f"}
     while index < codepoint_count:
         if (character := text[index]) in SPECIAL:
-            if not spans:
-                # ZWJ or variation selector at the beginning of the string doesn't really make sense.
-                # But handle it, we must.
-                spans.append((index, index := index + 1, 0))
-                continue
-            if character == "\u200d":
-                # zero width joiner
-                # The condition handles the case where a ZWJ is at the end of the string, and has nothing to join
-                index += 2 if index < (codepoint_count - 1) else 1
-                start, _end, cell_length = spans[-1]
-                spans[-1] = (start, index, cell_length)
-            else:
-                # variation selector 16
-                index += 1
-                if last_measured_character:
-                    start, _end, cell_length = spans[-1]
-                    if last_measured_character in cell_table.narrow_to_wide:
-                        last_measured_character = None
-                        cell_length += 1
-                        total_width += 1
-                    spans[-1] = (start, index, cell_length)
-                else:
-                    # No previous character to change the size of.
-                    # Shouldn't occur in practice.
-                    # But handle it, we must.
-                    start, _end, cell_length = spans[-1]
-                    spans[-1] = (start, index, cell_length)
+            index, last_measured_character, total_width = _split_special_grapheme(
+                character,
+                index,
+                codepoint_count,
+                spans,
+                cell_table,
+                last_measured_character,
+                total_width,
+            )
             continue
 
         if character_width := get_character_cell_size(character, unicode_version):
@@ -220,16 +290,32 @@ def split_graphemes(
             spans.append((index, index := index + 1, character_width))
             total_width += character_width
         else:
-            # Character has zero width
-            if spans:
-                # zero width characters are associated with the previous character
-                start, _end, cell_length = spans[-1]
-                spans[-1] = (start, index := index + 1, cell_length)
-            else:
-                # A zero width character with no prior spans
-                spans.append((index, index := index + 1, 0))
+            index = _extend_zero_width_grapheme(spans, index)
 
     return (spans, total_width)
+
+
+def _split_text_at_offset(
+    text: str,
+    spans: list[tuple[int, int, int]],
+    offset: int,
+    left_size: int,
+    cell_position: int,
+) -> tuple[str, str] | tuple[int, int] | None:
+    if left_size == cell_position:
+        if offset >= len(spans):
+            return text, ""
+        split_index = spans[offset][0]
+        return text[:split_index], text[split_index:]
+    if left_size < cell_position:
+        start, end, cell_size = spans[offset]
+        if left_size + cell_size > cell_position:
+            return text[:start] + " ", " " + text[end:]
+        return offset + 1, left_size + cell_size
+    start, end, cell_size = spans[offset - 1]
+    if left_size - cell_size < cell_position:
+        return text[:start] + " ", " " + text[end:]
+    return offset - 1, left_size - cell_size
 
 
 def _split_text(
@@ -257,23 +343,12 @@ def _split_text(
     left_size = sum(map(_span_get_cell_len, spans[:offset]))
 
     while True:
-        if left_size == cell_position:
-            if offset >= len(spans):
-                return text, ""
-            split_index = spans[offset][0]
-            return text[:split_index], text[split_index:]
-        if left_size < cell_position:
-            start, end, cell_size = spans[offset]
-            if left_size + cell_size > cell_position:
-                return text[:start] + " ", " " + text[end:]
-            offset += 1
-            left_size += cell_size
-        else:  # left_size > cell_position
-            start, end, cell_size = spans[offset - 1]
-            if left_size - cell_size < cell_position:
-                return text[:start] + " ", " " + text[end:]
-            offset -= 1
-            left_size -= cell_size
+        result = _split_text_at_offset(
+            text, spans, offset, left_size, cell_position
+        )
+        if isinstance(result, tuple) and isinstance(result[0], str):
+            return result
+        offset, left_size = result
 
 
 def split_text(

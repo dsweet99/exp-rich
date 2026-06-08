@@ -1,11 +1,7 @@
 from operator import itemgetter
-from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, Sequence
+from typing import Callable, NamedTuple, Optional, Sequence
 
 from . import errors
-from .protocol import is_renderable, rich_cast
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType
 
 
 class Measurement(NamedTuple):
@@ -76,9 +72,7 @@ class Measurement(NamedTuple):
         return measurement
 
     @classmethod
-    def get(
-        cls, console: "Console", options: "ConsoleOptions", renderable: "RenderableType"
-    ) -> "Measurement":
+    def get(cls, console: object, options: object, renderable: object) -> "Measurement":
         """Get a measurement for a renderable.
 
         Args:
@@ -99,11 +93,13 @@ class Measurement(NamedTuple):
             renderable = console.render_str(
                 renderable, markup=options.markup, highlight=False
             )
+        from ._renderable import is_renderable, rich_cast
+
         renderable = rich_cast(renderable)
         if is_renderable(renderable):
-            get_console_width: Optional[
-                Callable[["Console", "ConsoleOptions"], "Measurement"]
-            ] = getattr(renderable, "__rich_measure__", None)
+            get_console_width: Optional[Callable[..., "Measurement"]] = getattr(
+                renderable, "__rich_measure__", None
+            )
             if get_console_width is not None:
                 render_width = (
                     get_console_width(console, options)
@@ -123,9 +119,7 @@ class Measurement(NamedTuple):
 
 
 def measure_renderables(
-    console: "Console",
-    options: "ConsoleOptions",
-    renderables: Sequence["RenderableType"],
+    console: object, options: object, renderables: Sequence[object]
 ) -> "Measurement":
     """Get a measurement that would fit a number of renderables.
 

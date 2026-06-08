@@ -22,7 +22,10 @@ def get_content(user):
 console = Console()
 
 
-users = json.loads(urlopen("https://randomuser.me/api/?results=30").read())["results"]
-console.print(users, overflow="ignore", crop=False)
-user_renderables = [Panel(get_content(user), expand=True) for user in users]
-console.print(Columns(user_renderables))
+if __name__ == "__main__":
+    users = json.loads(urlopen("https://randomuser.me/api/?results=30").read())[
+        "results"
+    ]
+    console.print(users, overflow="ignore", crop=False)
+    user_renderables = [Panel(get_content(user), expand=True) for user in users]
+    console.print(Columns(user_renderables))

@@ -1,9 +1,25 @@
 import pytest
 
-from rich.ansi import AnsiDecoder
+from rich.ansi import AnsiDecoder, _ansi_tokenize, decode_ansi_tokens
 from rich.console import Console
 from rich.style import Style
 from rich.text import Span, Text
+
+
+def test_ansi_decoder_plain_text():
+    decoder = AnsiDecoder()
+    lines = list(decoder.decode("plain"))
+    assert len(lines) == 1
+    assert lines[0].plain == "plain"
+
+
+def test_decode_ansi_tokens_helper():
+    text = Text()
+    style = Style.null()
+    tokens = list(_ansi_tokenize("\x1b[1mhi\x1b[0m"))
+    decode_ansi_tokens(tokens, text.append, style)
+    assert text.plain == "hi"
+    assert text.spans
 
 
 def test_decode():

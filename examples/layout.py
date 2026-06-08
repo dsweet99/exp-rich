@@ -47,9 +47,10 @@ class Clock:
 
 layout["header"].update(Clock())
 
-with Live(layout, screen=True, redirect_stderr=False) as live:
-    try:
-        while True:
-            sleep(1)
-    except KeyboardInterrupt:
-        pass
+if __name__ == "__main__":
+    with Live(layout, screen=True, redirect_stderr=False) as live:
+        try:
+            while True:
+                sleep(1)
+        except KeyboardInterrupt:
+            pass

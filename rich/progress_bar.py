@@ -6,16 +6,16 @@ from typing import Iterable, List, Optional
 from .color import Color, blend_rgb
 from .color_triplet import ColorTriplet
 from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
 from .measure import Measurement
 from .segment import Segment
 from .style import Style, StyleType
+from ._jupyter_mixin import JupyterMixin
 
 # Number of characters before 'pulse' animation repeats
 PULSE_SIZE = 20
 
 
-class ProgressBar(JupyterMixin):
+class ProgressBar:
     """Renders a (progress) bar. Used by rich.progress.
 
     Args:
@@ -29,6 +29,7 @@ class ProgressBar(JupyterMixin):
         pulse_style (StyleType, optional): Style for pulsing bars. Defaults to "bar.pulse".
         animation_time (Optional[float], optional): Time in seconds to use for animation, or None to use system time.
     """
+
 
     def __init__(
         self,
@@ -153,20 +154,12 @@ class ProgressBar(JupyterMixin):
         segments = segments[offset : offset + width]
         yield from segments
 
-    def __rich_console__(
-        self, console: Console, options: ConsoleOptions
+    def _render_complete_bar(
+        self, console: Console, width: int, ascii: bool
     ) -> RenderResult:
-        width = min(self.width or options.max_width, options.max_width)
-        ascii = options.legacy_windows or options.ascii_only
-        should_pulse = self.pulse or self.total is None
-        if should_pulse:
-            yield from self._render_pulse(console, width, ascii=ascii)
-            return
-
         completed: Optional[float] = (
             min(self.total, max(0, self.completed)) if self.total is not None else None
         )
-
         bar = "-" if ascii else "━"
         half_bar_right = " " if ascii else "╸"
         half_bar_left = " " if ascii else "╺"
@@ -187,15 +180,27 @@ class ProgressBar(JupyterMixin):
             yield _Segment(bar * bar_count, complete_style)
         if half_bar_count:
             yield _Segment(half_bar_right * half_bar_count, complete_style)
+        if console.no_color:
+            return
+        remaining_bars = width - bar_count - half_bar_count
+        if not remaining_bars or console.color_system is None:
+            return
+        if not half_bar_count and bar_count:
+            yield _Segment(half_bar_left, style)
+            remaining_bars -= 1
+        if remaining_bars:
+            yield _Segment(bar * remaining_bars, style)
 
-        if not console.no_color:
-            remaining_bars = width - bar_count - half_bar_count
-            if remaining_bars and console.color_system is not None:
-                if not half_bar_count and bar_count:
-                    yield _Segment(half_bar_left, style)
-                    remaining_bars -= 1
-                if remaining_bars:
-                    yield _Segment(bar * remaining_bars, style)
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        width = min(self.width or options.max_width, options.max_width)
+        ascii = options.legacy_windows or options.ascii_only
+        should_pulse = self.pulse or self.total is None
+        if should_pulse:
+            yield from self._render_pulse(console, width, ascii=ascii)
+            return
+        yield from self._render_complete_bar(console, width, ascii)
 
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
@@ -206,18 +211,3 @@ class ProgressBar(JupyterMixin):
             else Measurement(4, options.max_width)
         )
 
-
-if __name__ == "__main__":  # pragma: no cover
-    console = Console()
-    bar = ProgressBar(width=50, total=100)
-
-    import time
-
-    console.show_cursor(False)
-    for n in range(0, 101, 1):
-        bar.update(n)
-        console.print(bar)
-        console.file.write("\r")
-        time.sleep(0.05)
-    console.show_cursor(True)
-    console.print()

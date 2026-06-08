@@ -1,9 +1,6 @@
 from pathlib import Path
-from json import loads, dumps
+import json as _stdlib_json
 from typing import Any, Callable, Optional, Union
-
-from .text import Text
-from .highlighter import JSONHighlighter, NullHighlighter
 
 
 class JSON:
@@ -34,8 +31,8 @@ class JSON:
         default: Optional[Callable[[Any], Any]] = None,
         sort_keys: bool = False,
     ) -> None:
-        data = loads(json)
-        json = dumps(
+        data = _stdlib_json.loads(json)
+        json = _stdlib_json.dumps(
             data,
             indent=indent,
             skipkeys=skip_keys,
@@ -45,6 +42,8 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
+        from .highlighter import JSONHighlighter, NullHighlighter
+
         highlighter = JSONHighlighter() if highlight else NullHighlighter()
         self.text = highlighter(json)
         self.text.no_wrap = True
@@ -82,7 +81,7 @@ class JSON:
             JSON: New JSON object from the given data.
         """
         json_instance: "JSON" = cls.__new__(cls)
-        json = dumps(
+        json = _stdlib_json.dumps(
             data,
             indent=indent,
             skipkeys=skip_keys,
@@ -92,48 +91,14 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
+        from .highlighter import JSONHighlighter, NullHighlighter
+
         highlighter = JSONHighlighter() if highlight else NullHighlighter()
         json_instance.text = highlighter(json)
         json_instance.text.no_wrap = True
         json_instance.text.overflow = None
         return json_instance
 
-    def __rich__(self) -> Text:
+    def __rich__(self) -> Any:
         return self.text
 
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-
-    parser = argparse.ArgumentParser(description="Pretty print json")
-    parser.add_argument(
-        "path",
-        metavar="PATH",
-        help="path to file, or - for stdin",
-    )
-    parser.add_argument(
-        "-i",
-        "--indent",
-        metavar="SPACES",
-        type=int,
-        help="Number of spaces in an indent",
-        default=2,
-    )
-    args = parser.parse_args()
-
-    from rich.console import Console
-
-    console = Console()
-    error_console = Console(stderr=True)
-
-    try:
-        if args.path == "-":
-            json_data = sys.stdin.read()
-        else:
-            json_data = Path(args.path).read_text()
-    except Exception as error:
-        error_console.print(f"Unable to read {args.path!r}; {error}")
-        sys.exit(-1)
-
-    console.print(JSON(json_data, indent=args.indent), soft_wrap=True)

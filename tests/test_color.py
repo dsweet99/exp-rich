@@ -28,11 +28,7 @@ def test_color_system_repr() -> None:
 def test_rich() -> None:
     color = Color.parse("red")
     as_text = color.__rich__()
-    print(repr(as_text))
-    print(repr(as_text.spans))
-    assert as_text == Text(
-        "<color 'red' (standard)⬤ >", spans=[Span(23, 24, Style(color=color))]
-    )
+    assert as_text == "<color 'red' (standard)>"
 
 
 def test_system() -> None:

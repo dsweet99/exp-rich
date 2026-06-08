@@ -644,7 +644,7 @@ def test_wrap_file() -> None:
         os.remove(filename)
 
 
-def test_wrap_file_task_total() -> None:
+def _run_wrap_file_with_progress(filename: str, total: int) -> None:
     console = Console(
         file=io.StringIO(),
         force_terminal=True,
@@ -653,19 +653,20 @@ def test_wrap_file_task_total() -> None:
         legacy_windows=False,
         _environ={},
     )
-    progress = Progress(
-        console=console,
-    )
+    progress = Progress(console=console)
+    with progress:
+        with open(filename, "rb") as file:
+            task_id = progress.add_task("Reading", total=total)
+            with progress.wrap_file(file, task_id=task_id) as f:
+                assert f.read() == b"Hello, World!"
 
+
+def test_wrap_file_task_total() -> None:
     fd, filename = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         total = f.write(b"Hello, World!")
     try:
-        with progress:
-            with open(filename, "rb") as file:
-                task_id = progress.add_task("Reading", total=total)
-                with progress.wrap_file(file, task_id=task_id) as f:
-                    assert f.read() == b"Hello, World!"
+        _run_wrap_file_with_progress(filename, total)
     finally:
         os.remove(filename)
 

@@ -11,6 +11,46 @@ class Edge(Protocol):
     minimum_size: int = 1
 
 
+def _flexible_edges(
+    sizes: list[int | None], edges: Sequence[Edge]
+) -> list[tuple[int, Edge]]:
+    return [
+        (index, edge)
+        for index, (size, edge) in enumerate(zip(sizes, edges))
+        if size is None
+    ]
+
+
+def _clamp_flexible_sizes(
+    sizes: list[int | None], edges: Sequence[Edge]
+) -> list[int]:
+    return [
+        ((edge.minimum_size or 1) if size is None else size)
+        for size, edge in zip(sizes, edges)
+    ]
+
+
+def _apply_minimum_sizes(
+    sizes: list[int | None],
+    flexible_edges: list[tuple[int, Edge]],
+    portion: Fraction,
+) -> bool:
+    for index, edge in flexible_edges:
+        if portion * edge.ratio <= edge.minimum_size:
+            sizes[index] = edge.minimum_size
+            return True
+    return False
+
+
+def _distribute_flexible_sizes(
+    sizes: list[int | None], flexible_edges: list[tuple[int, Edge]], portion: Fraction
+) -> None:
+    remainder = Fraction(0)
+    for index, edge in flexible_edges:
+        size, remainder = divmod(portion * edge.ratio + remainder, 1)
+        sizes[index] = size
+
+
 def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
     """Divide total space to satisfy size, ratio, and minimum_size, constraints.
 
@@ -27,48 +67,20 @@ def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
     Returns:
         List[int]: Number of characters for each edge.
     """
-    # Size of edge or None for yet to be determined
     sizes = [(edge.size or None) for edge in edges]
-
     _Fraction = Fraction
-
-    # While any edges haven't been calculated
     while None in sizes:
-        # Get flexible edges and index to map these back on to sizes list
-        flexible_edges = [
-            (index, edge)
-            for index, (size, edge) in enumerate(zip(sizes, edges))
-            if size is None
-        ]
-        # Remaining space in total
+        flexible_edges = _flexible_edges(sizes, edges)
         remaining = total - sum(size or 0 for size in sizes)
         if remaining <= 0:
-            # No room for flexible edges
-            return [
-                ((edge.minimum_size or 1) if size is None else size)
-                for size, edge in zip(sizes, edges)
-            ]
-        # Calculate number of characters in a ratio portion
+            return _clamp_flexible_sizes(sizes, edges)
         portion = _Fraction(
             remaining, sum((edge.ratio or 1) for _, edge in flexible_edges)
         )
-
-        # If any edges will be less than their minimum, replace size with the minimum
-        for index, edge in flexible_edges:
-            if portion * edge.ratio <= edge.minimum_size:
-                sizes[index] = edge.minimum_size
-                # New fixed size will invalidate calculations, so we need to repeat the process
-                break
-        else:
-            # Distribute flexible space and compensate for rounding error
-            # Since edge sizes can only be integers we need to add the remainder
-            # to the following line
-            remainder = _Fraction(0)
-            for index, edge in flexible_edges:
-                size, remainder = divmod(portion * edge.ratio + remainder, 1)
-                sizes[index] = size
-            break
-    # Sizes now contains integers only
+        if _apply_minimum_sizes(sizes, flexible_edges, portion):
+            continue
+        _distribute_flexible_sizes(sizes, flexible_edges, portion)
+        break
     return cast(List[int], sizes)
 
 
@@ -139,15 +151,3 @@ def ratio_distribute(
         total_remaining -= distributed
     return distributed_total
 
-
-if __name__ == "__main__":
-    from dataclasses import dataclass
-
-    @dataclass
-    class E:
-        size: Optional[int] = None
-        ratio: int = 1
-        minimum_size: int = 1
-
-    resolved = ratio_resolve(110, [E(None, 1, 1), E(None, 1, 1), E(None, 1, 1)])
-    print(sum(resolved))

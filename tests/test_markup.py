@@ -2,8 +2,10 @@ import pytest
 
 from rich.console import Console
 from rich.errors import MarkupError
-from rich.markup import RE_TAGS, Tag, _parse, escape, render
+from rich.markup import RE_TAGS, Tag, _apply_markup_token, _close_markup_tag, _finalize_markup_spans, _handler_meta_params, _parse, _pop_closing_tag, _pop_style_from_stack, _render_unmarked, escape, render, render_console_markup
 from rich.text import Span, Text
+
+_markup_render = render
 
 
 def test_re_no_match():
@@ -217,3 +219,16 @@ def test_render_meta():
 
     text = render("foo[@click=(1, 2, 3)]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {"@click": (1, 2, 3)}
+
+
+def test_markup_internals():
+    assert _render_unmarked("plain", "bold", True, None).plain == "plain"
+    assert _handler_meta_params(Tag("bold", None)) == ()
+    text = render("[bold]x[/bold]")
+    _finalize_markup_spans(text, [], [])
+    stack = [(0, Tag("bold", None))]
+    _pop_style_from_stack(stack, "bold")
+    _pop_closing_tag(Tag("/bold", None), 0, [(0, Tag("bold", None))])
+    _close_markup_tag(Tag("/bold", None), 0, [(0, Tag("bold", None))], text, [])
+    _apply_markup_token(0, "y", None, text, [], [], True)
+    assert text.plain == "xy"

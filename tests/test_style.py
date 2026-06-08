@@ -265,3 +265,30 @@ def test_clear_meta_and_links_clears_hash():
 
     clear_style = style.clear_meta_and_links()
     assert clear_style._hash is None
+
+
+def test_from_color():
+    red = Color.parse("red")
+    style = Style.from_color(red)
+    assert style.color == red
+
+
+def test_normalize():
+    assert Style.normalize("bold red") == str(Style.parse("bold red"))
+
+
+def test_transparent_background():
+    assert Style(color="red").transparent_background is True
+    assert Style(color="red", bgcolor="blue").transparent_background is False
+
+
+def test_combine():
+    combined = Style.combine([Style(bold=True), Style(color="red")])
+    assert combined.bold is True
+    assert combined.color == Color.parse("red")
+
+
+def test_update_link():
+    style = Style(link="https://example.org")
+    updated = style.update_link("https://new.example.org")
+    assert updated.link == "https://new.example.org"

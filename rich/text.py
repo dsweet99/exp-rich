@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import re
 from functools import partial, reduce
+from itertools import zip_longest
 from math import gcd
 from operator import itemgetter
 from typing import (
@@ -8,32 +11,37 @@ from typing import (
     Callable,
     Dict,
     Iterable,
+    Iterator,
     List,
+    Literal,
     NamedTuple,
     Optional,
     Pattern,
     Tuple,
     Union,
+    overload,
 )
 
+from ._highlight_bridge import configure as _configure_highlight_bridge
+from ._highlight_bridge import configure_panel as _configure_panel_bridge
+from ._highlight_bridge import escape_markup, invoke_markup_render
 from ._loop import loop_last
 from ._pick import pick_bool
 from ._wrap import divide_line
-from .align import AlignMethod
 from .cells import cell_len, set_cell_size
-from .containers import Lines
-from .control import strip_control_codes
-from .emoji import EmojiVariant
-from .jupyter import JupyterMixin
+from ._control_strip import strip_control_codes
+from ._emoji_variant import EmojiVariant
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement
 from .segment import Segment
 from .style import Style, StyleType
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .console import Console, ConsoleOptions, JustifyMethod, OverflowMethod
 
-DEFAULT_JUSTIFY: "JustifyMethod" = "default"
-DEFAULT_OVERFLOW: "OverflowMethod" = "fold"
+DEFAULT_JUSTIFY = "default"
+DEFAULT_OVERFLOW = "fold"
+JustifyMethod = Literal["default", "left", "center", "right", "full"]
+OverflowMethod = Literal["fold", "crop", "ellipsis", "ignore"]
+AlignMethod = Literal["left", "center", "right"]
 
 
 _re_whitespace = re.compile(r"\s+$")
@@ -74,45 +82,321 @@ class Span(NamedTuple):
         return span1, span2
 
     def move(self, offset: int) -> "Span":
-        """Move start and end by a given offset.
-
-        Args:
-            offset (int): Number of characters to add to start and end.
-
-        Returns:
-            TextSpan: A new TextSpan with adjusted position.
-        """
+        """Move start and end by a given offset."""
         start, end, style = self
         return Span(start + offset, end + offset, style)
 
     def right_crop(self, offset: int) -> "Span":
-        """Crop the span at the given offset.
-
-        Args:
-            offset (int): A value between start and end.
-
-        Returns:
-            Span: A new (possibly smaller) span.
-        """
+        """Crop the span at the given offset."""
         start, end, style = self
         if offset >= end:
             return self
         return Span(start, min(offset, end), style)
 
     def extend(self, cells: int) -> "Span":
-        """Extend the span by the given number of cells.
-
-        Args:
-            cells (int): Additional space to add to end of span.
-
-        Returns:
-            Span: A span.
-        """
+        """Extend the span by the given number of cells."""
         if cells:
             start, end, style = self
             return Span(start, end + cells, style)
+        return self
+
+
+def _truncate_overflow(text: "Text", max_width: int, overflow: str) -> None:
+    length = cell_len(text.plain)
+    if length <= max_width:
+        return
+    if overflow == "ellipsis":
+        text.plain = set_cell_size(text.plain, max_width - 1) + "…"
+    else:
+        text.plain = set_cell_size(text.plain, max_width)
+
+
+def _truncate_pad(text: "Text", max_width: int, length: int) -> None:
+    if length >= max_width:
+        return
+    spaces = max_width - length
+    text._text = [f"{text.plain}{' ' * spaces}"]
+    text._length = len(text.plain)
+
+
+def _append_str_to_text(
+    text: "Text", value: str, style: Optional[Union[str, Style]]
+) -> None:
+    sanitized_text = strip_control_codes(value)
+    text._text.append(sanitized_text)
+    offset = len(text)
+    text_length = len(sanitized_text)
+    if style:
+        text._spans.append(Span(offset, offset + text_length, style))
+    text._length += text_length
+
+
+def _append_text_to_text(
+    text: "Text", other: "Text", style: Optional[Union[str, Style]]
+) -> None:
+    if style is not None:
+        raise ValueError("style must not be set when appending Text instance")
+    _Span = Span
+    text_length = text._length
+    if other.style:
+        text._spans.append(_Span(text_length, text_length + len(other), other.style))
+    text._text.append(other.plain)
+    text._spans.extend(
+        _Span(start + text_length, end + text_length, span_style)
+        for start, end, span_style in other._spans.copy()
+    )
+    text._length += len(other)
+
+
+def text_at_offset(text: "Text", offset: int, text_cls: type) -> "Text":
+    """Return a single-character Text slice with spans applied."""
+    return text_cls(
+        text.plain[offset],
+        spans=[
+            Span(0, 1, style)
+            for start, end, style in text._spans
+            if end > offset >= start
+        ],
+        end="",
+    )
+
+
+def _expand_tab_part(part: "Text", tab_size: int, cell_position: int) -> int:
+    if not part.plain.endswith("\t"):
+        return cell_position + part.cell_len
+    part._text[-1] = part._text[-1][:-1] + " "
+    cell_position += part.cell_len
+    tab_remainder = cell_position % tab_size
+    if tab_remainder:
+        spaces = tab_size - tab_remainder
+        part.extend_style(spaces)
+        cell_position += spaces
+    return cell_position
+
+
+def expand_tab_line(line: "Text", tab_size: int, text_cls: type) -> List["Text"]:
+    """Expand tabs in a single Text line."""
+    if "\t" not in line.plain:
+        return [line]
+    new_text: List["Text"] = []
+    append = new_text.append
+    cell_position = 0
+    for part in line.split("\t", include_separator=True):
+        if part.plain.endswith("\t"):
+            cell_position = _expand_tab_part(part, tab_size, cell_position)
         else:
-            return self
+            cell_position += part.cell_len
+        append(part)
+    return new_text
+
+
+def _find_line_for_offset(
+    line_ranges: List[Tuple[int, int]], offset: int
+) -> int:
+    lower_bound = 0
+    upper_bound = len(line_ranges)
+    line_no = (lower_bound + upper_bound) // 2
+    while True:
+        line_start, line_end = line_ranges[line_no]
+        if offset < line_start:
+            upper_bound = line_no - 1
+        elif offset > line_end:
+            lower_bound = line_no + 1
+        else:
+            return line_no
+        line_no = (lower_bound + upper_bound) // 2
+
+
+def _find_end_line(
+    line_ranges: List[Tuple[int, int]],
+    span_end: int,
+    start_line_no: int,
+    line_count: int,
+) -> int:
+    line_start, line_end = line_ranges[start_line_no]
+    if span_end < line_end:
+        return start_line_no
+    lower_bound = start_line_no
+    upper_bound = line_count
+    end_line_no = start_line_no
+    while True:
+        line_start, line_end = line_ranges[end_line_no]
+        if span_end < line_start:
+            upper_bound = end_line_no - 1
+        elif span_end > line_end:
+            lower_bound = end_line_no + 1
+        else:
+            return end_line_no
+        end_line_no = (lower_bound + upper_bound) // 2
+
+
+def assign_spans_to_divided_lines(
+    spans: Iterable[Span],
+    line_ranges: List[Tuple[int, int]],
+    line_appends: List,
+) -> None:
+    """Copy spans from a parent Text onto divided line instances."""
+    line_count = len(line_ranges)
+    for span_start, span_end, style in spans:
+        start_line_no = _find_line_for_offset(line_ranges, span_start)
+        end_line_no = _find_end_line(
+            line_ranges, span_end, start_line_no, line_count
+        )
+        for line_no in range(start_line_no, end_line_no + 1):
+            line_start, line_end = line_ranges[line_no]
+            new_start = max(0, span_start - line_start)
+            new_end = min(span_end - line_start, line_end - line_start)
+            if new_end > new_start:
+                line_appends[line_no](Span(new_start, new_end, style))
+
+
+def _build_style_events(
+    text_length: int,
+    spans: Iterable[Span],
+    get_style: Callable,
+    base_style,
+) -> Tuple[List[Tuple[int, bool, int]], Dict[int, Style]]:
+    enumerated_spans = list(enumerate(spans, 1))
+    style_map = {index: get_style(span.style) for index, span in enumerated_spans}
+    style_map[0] = get_style(base_style)
+    events = [
+        (0, False, 0),
+        *((span.start, False, index) for index, span in enumerated_spans),
+        *((span.end, True, index) for index, span in enumerated_spans),
+        (text_length, True, 0),
+    ]
+    events.sort(key=itemgetter(0, 1))
+    return events, style_map
+
+
+def render_spanned_text(
+    text: str,
+    spans: Iterable[Span],
+    get_style: Callable,
+    base_style,
+    end: str = "",
+) -> Iterable[Segment]:
+    """Yield segments for styled text."""
+    events, style_map = _build_style_events(len(text), spans, get_style, base_style)
+    stack: List[int] = []
+    stack_append = stack.append
+    stack_pop = stack.remove
+    style_cache: Dict[Tuple[Style, ...], Style] = {}
+    style_cache_get = style_cache.get
+    combine = Style.combine
+    _Segment = Segment
+
+    def get_current_style() -> Style:
+        styles = tuple(style_map[_style_id] for _style_id in sorted(stack))
+        cached_style = style_cache_get(styles)
+        if cached_style is not None:
+            return cached_style
+        current_style = combine(styles)
+        style_cache[styles] = current_style
+        return current_style
+
+    for (offset, leaving, style_id), (next_offset, _, _) in zip(events, events[1:]):
+        if leaving:
+            stack_pop(style_id)
+        else:
+            stack_append(style_id)
+        if next_offset > offset:
+            yield _Segment(text[offset:next_offset], get_current_style())
+    if end:
+        yield _Segment(end)
+
+
+def wrap_text_line(
+    line: "Text",
+    console: "Console",
+    width: int,
+    *,
+    wrap_justify: "JustifyMethod",
+    wrap_overflow: "OverflowMethod",
+    tab_size: int,
+    no_wrap: bool,
+) -> Lines:
+    if "\t" in line:
+        line.expand_tabs(tab_size)
+    if no_wrap:
+        if wrap_overflow == "ignore":
+            return Lines([line])
+        new_lines = Lines([line])
+    else:
+        offsets = divide_line(str(line), width, fold=wrap_overflow == "fold")
+        new_lines = line.divide(offsets)
+        for divided_line in new_lines:
+            divided_line.rstrip_end(width)
+    if wrap_justify:
+        new_lines.justify(
+            console, width, justify=wrap_justify, overflow=wrap_overflow
+        )
+    for divided_line in new_lines:
+        divided_line.truncate(width, overflow=wrap_overflow)
+    return new_lines
+
+
+def wrap_text(
+    text: "Text",
+    console: "Console",
+    width: int,
+    *,
+    justify: Optional["JustifyMethod"] = None,
+    overflow: Optional["OverflowMethod"] = None,
+    tab_size: int = 8,
+    no_wrap: Optional[bool] = None,
+) -> Lines:
+    wrap_justify = justify or text.justify or DEFAULT_JUSTIFY
+    wrap_overflow = overflow or text.overflow or DEFAULT_OVERFLOW
+    no_wrap = pick_bool(no_wrap, text.no_wrap, False) or overflow == "ignore"
+    lines = Lines()
+    for line in text.split(allow_blank=True):
+        lines.extend(
+            wrap_text_line(
+                line,
+                console,
+                width,
+                wrap_justify=wrap_justify,
+                wrap_overflow=wrap_overflow,
+                tab_size=tab_size,
+                no_wrap=no_wrap,
+            )
+        )
+    return lines
+
+
+def build_indent_guide_lines(
+    text: "Text",
+    indent_size: int,
+    character: str,
+    style: StyleType,
+    text_cls: type,
+) -> List["Text"]:
+    """Return lines with indent guides applied."""
+    text = text.copy()
+    text.expand_tabs()
+    indent_line = f"{character}{' ' * (indent_size - 1)}"
+    re_indent = re.compile(r"^( *)(.*)$")
+    new_lines: List["Text"] = []
+    add_line = new_lines.append
+    blank_lines = 0
+    for line in text.split(allow_blank=True):
+        match = re_indent.match(line.plain)
+        if not match or not match.group(2):
+            blank_lines += 1
+            continue
+        indent = match.group(1)
+        full_indents, remaining_space = divmod(len(indent), indent_size)
+        new_indent = f"{indent_line * full_indents}{' ' * remaining_space}"
+        line.plain = new_indent + line.plain[len(new_indent) :]
+        line.stylize(style, 0, len(new_indent))
+        if blank_lines:
+            new_lines.extend([text_cls(new_indent, style=style)] * blank_lines)
+            blank_lines = 0
+        add_line(line)
+    if blank_lines:
+        new_lines.extend([text_cls("", style=style)] * blank_lines)
+    return new_lines
 
 
 class Text(JupyterMixin):
@@ -196,30 +480,13 @@ class Text(JupyterMixin):
         return False
 
     def __getitem__(self, slice: Union[int, slice]) -> "Text":
-        def get_text_at(offset: int) -> "Text":
-            _Span = Span
-            text = Text(
-                self.plain[offset],
-                spans=[
-                    _Span(0, 1, style)
-                    for start, end, style in self._spans
-                    if end > offset >= start
-                ],
-                end="",
-            )
-            return text
-
         if isinstance(slice, int):
-            return get_text_at(slice)
-        else:
-            start, stop, step = slice.indices(len(self.plain))
-            if step == 1:
-                lines = self.divide([start, stop])
-                return lines[1]
-            else:
-                # This would be a bit of work to implement efficiently
-                # For now, its not required
-                raise TypeError("slices with step!=1 are not supported")
+            return text_at_offset(self, slice, Text)
+        start, stop, step = slice.indices(len(self.plain))
+        if step == 1:
+            lines = self.divide([start, stop])
+            return lines[1]
+        raise TypeError("slices with step!=1 are not supported")
 
     @property
     def cell_len(self) -> int:
@@ -233,8 +500,6 @@ class Text(JupyterMixin):
         Returns:
             str: A string potentially creating markup tags.
         """
-        from .markup import escape
-
         output: List[str] = []
 
         plain = self.plain
@@ -249,7 +514,7 @@ class Text(JupyterMixin):
         append = output.append
         for offset, closing, style in markup_spans:
             if offset > position:
-                append(escape(plain[position:offset]))
+                append(escape_markup(plain[position:offset]))
                 position = offset
             if style:
                 append(f"[/{style}]" if closing else f"[{style}]")
@@ -282,9 +547,11 @@ class Text(JupyterMixin):
         Returns:
             Text: A Text instance with markup rendered.
         """
-        from .markup import render
+        from ._highlight_bridge import invoke_markup_render
 
-        rendered_text = render(text, style, emoji=emoji, emoji_variant=emoji_variant)
+        rendered_text = invoke_markup_render(
+            text, style, emoji=emoji, emoji_variant=emoji_variant
+        )
         rendered_text.justify = justify
         rendered_text.overflow = overflow
         rendered_text.end = end
@@ -313,8 +580,9 @@ class Text(JupyterMixin):
             end (str, optional): Character to end text with. Defaults to "\\\\n".
             tab_size (int): Number of spaces per tab, or ``None`` to use ``console.tab_size``. Defaults to None.
         """
-        from .ansi import AnsiDecoder
+        from ._runtime import _mod
 
+        AnsiDecoder = _mod("rich.ansi").AnsiDecoder
         joiner = Text(
             "\n",
             justify=justify,
@@ -726,54 +994,14 @@ class Text(JupyterMixin):
         Returns:
             Iterable[Segment]: Result of render that may be written to the console.
         """
-        _Segment = Segment
         text = self.plain
         if not self._spans:
             yield Segment(text)
             if end:
-                yield _Segment(end)
+                yield Segment(end)
             return
         get_style = partial(console.get_style, default=Style.null())
-
-        enumerated_spans = list(enumerate(self._spans, 1))
-        style_map = {index: get_style(span.style) for index, span in enumerated_spans}
-        style_map[0] = get_style(self.style)
-
-        spans = [
-            (0, False, 0),
-            *((span.start, False, index) for index, span in enumerated_spans),
-            *((span.end, True, index) for index, span in enumerated_spans),
-            (len(text), True, 0),
-        ]
-        spans.sort(key=itemgetter(0, 1))
-
-        stack: List[int] = []
-        stack_append = stack.append
-        stack_pop = stack.remove
-
-        style_cache: Dict[Tuple[Style, ...], Style] = {}
-        style_cache_get = style_cache.get
-        combine = Style.combine
-
-        def get_current_style() -> Style:
-            """Construct current style from stack."""
-            styles = tuple(style_map[_style_id] for _style_id in sorted(stack))
-            cached_style = style_cache_get(styles)
-            if cached_style is not None:
-                return cached_style
-            current_style = combine(styles)
-            style_cache[styles] = current_style
-            return current_style
-
-        for (offset, leaving, style_id), (next_offset, _, _) in zip(spans, spans[1:]):
-            if leaving:
-                stack_pop(style_id)
-            else:
-                stack_append(style_id)
-            if next_offset > offset:
-                yield _Segment(text[offset:next_offset], get_current_style())
-        if end:
-            yield _Segment(end)
+        yield from render_spanned_text(text, self._spans, get_style, self.style, end)
 
     def join(self, lines: Iterable["Text"]) -> "Text":
         """Join text together with this instance as the separator.
@@ -830,25 +1058,9 @@ class Text(JupyterMixin):
 
         new_text: List[Text] = []
         append = new_text.append
-
         for line in self.split("\n", include_separator=True):
-            if "\t" not in line.plain:
-                append(line)
-            else:
-                cell_position = 0
-                parts = line.split("\t", include_separator=True)
-                for part in parts:
-                    if part.plain.endswith("\t"):
-                        part._text[-1] = part._text[-1][:-1] + " "
-                        cell_position += part.cell_len
-                        tab_remainder = cell_position % tab_size
-                        if tab_remainder:
-                            spaces = tab_size - tab_remainder
-                            part.extend_style(spaces)
-                            cell_position += spaces
-                    else:
-                        cell_position += part.cell_len
-                    append(part)
+            for part in expand_tab_line(line, tab_size, Text):
+                append(part)
 
         result = Text("").join(new_text)
 
@@ -871,17 +1083,12 @@ class Text(JupyterMixin):
             pad (bool, optional): Pad with spaces if the length is less than max_width. Defaults to False.
         """
         _overflow = overflow or self.overflow or DEFAULT_OVERFLOW
-        if _overflow != "ignore":
-            length = cell_len(self.plain)
-            if length > max_width:
-                if _overflow == "ellipsis":
-                    self.plain = set_cell_size(self.plain, max_width - 1) + "…"
-                else:
-                    self.plain = set_cell_size(self.plain, max_width)
-            if pad and length < max_width:
-                spaces = max_width - length
-                self._text = [f"{self.plain}{' ' * spaces}"]
-                self._length = len(self.plain)
+        if _overflow == "ignore":
+            return
+        length = cell_len(self.plain)
+        _truncate_overflow(self, max_width, _overflow)
+        if pad:
+            _truncate_pad(self, max_width, length)
 
     def _trim_spans(self) -> None:
         """Remove or modify any spans that are over the end of the text."""
@@ -977,32 +1184,12 @@ class Text(JupyterMixin):
         if not isinstance(text, (str, Text)):
             raise TypeError("Only str or Text can be appended to Text")
 
-        if len(text):
-            if isinstance(text, str):
-                sanitized_text = strip_control_codes(text)
-                self._text.append(sanitized_text)
-                offset = len(self)
-                text_length = len(sanitized_text)
-                if style:
-                    self._spans.append(Span(offset, offset + text_length, style))
-                self._length += text_length
-            elif isinstance(text, Text):
-                _Span = Span
-                if style is not None:
-                    raise ValueError(
-                        "style must not be set when appending Text instance"
-                    )
-                text_length = self._length
-                if text.style:
-                    self._spans.append(
-                        _Span(text_length, text_length + len(text), text.style)
-                    )
-                self._text.append(text.plain)
-                self._spans.extend(
-                    _Span(start + text_length, end + text_length, style)
-                    for start, end, style in text._spans.copy()
-                )
-                self._length += len(text)
+        if not len(text):
+            return self
+        if isinstance(text, str):
+            _append_str_to_text(self, text, style)
+        else:
+            _append_text_to_text(self, text, style)
         return self
 
     def append_text(self, text: "Text") -> "Text":
@@ -1138,48 +1325,11 @@ class Text(JupyterMixin):
         if not self._spans:
             return new_lines
 
-        _line_appends = [line._spans.append for line in new_lines._lines]
-        line_count = len(line_ranges)
-        _Span = Span
-
-        for span_start, span_end, style in self._spans:
-            lower_bound = 0
-            upper_bound = line_count
-            start_line_no = (lower_bound + upper_bound) // 2
-
-            while True:
-                line_start, line_end = line_ranges[start_line_no]
-                if span_start < line_start:
-                    upper_bound = start_line_no - 1
-                elif span_start > line_end:
-                    lower_bound = start_line_no + 1
-                else:
-                    break
-                start_line_no = (lower_bound + upper_bound) // 2
-
-            if span_end < line_end:
-                end_line_no = start_line_no
-            else:
-                end_line_no = lower_bound = start_line_no
-                upper_bound = line_count
-
-                while True:
-                    line_start, line_end = line_ranges[end_line_no]
-                    if span_end < line_start:
-                        upper_bound = end_line_no - 1
-                    elif span_end > line_end:
-                        lower_bound = end_line_no + 1
-                    else:
-                        break
-                    end_line_no = (lower_bound + upper_bound) // 2
-
-            for line_no in range(start_line_no, end_line_no + 1):
-                line_start, line_end = line_ranges[line_no]
-                new_start = max(0, span_start - line_start)
-                new_end = min(span_end - line_start, line_end - line_start)
-                if new_end > new_start:
-                    _line_appends[line_no](_Span(new_start, new_end, style))
-
+        assign_spans_to_divided_lines(
+            self._spans,
+            line_ranges,
+            [line._spans.append for line in new_lines._lines],
+        )
         return new_lines
 
     def right_crop(self, amount: int = 1) -> None:
@@ -1221,33 +1371,15 @@ class Text(JupyterMixin):
         Returns:
             Lines: Number of lines.
         """
-        wrap_justify = justify or self.justify or DEFAULT_JUSTIFY
-        wrap_overflow = overflow or self.overflow or DEFAULT_OVERFLOW
-
-        no_wrap = pick_bool(no_wrap, self.no_wrap, False) or overflow == "ignore"
-
-        lines = Lines()
-        for line in self.split(allow_blank=True):
-            if "\t" in line:
-                line.expand_tabs(tab_size)
-            if no_wrap:
-                if overflow == "ignore":
-                    lines.append(line)
-                    continue
-                new_lines = Lines([line])
-            else:
-                offsets = divide_line(str(line), width, fold=wrap_overflow == "fold")
-                new_lines = line.divide(offsets)
-                for line in new_lines:
-                    line.rstrip_end(width)
-            if wrap_justify:
-                new_lines.justify(
-                    console, width, justify=wrap_justify, overflow=wrap_overflow
-                )
-            for line in new_lines:
-                line.truncate(width, overflow=wrap_overflow)
-            lines.extend(new_lines)
-        return lines
+        return wrap_text(
+            self,
+            console,
+            width,
+            justify=justify,
+            overflow=overflow,
+            tab_size=tab_size,
+            no_wrap=no_wrap,
+        )
 
     def fit(self, width: int) -> Lines:
         """Fit the text in to given width by chopping in to lines.
@@ -1303,61 +1435,185 @@ class Text(JupyterMixin):
         Returns:
             Text: New text with indentation guides.
         """
-
         _indent_size = self.detect_indentation() if indent_size is None else indent_size
+        new_lines = build_indent_guide_lines(
+            self, _indent_size, character, style, Text
+        )
+        return self.blank_copy("\n").join(new_lines)
 
-        text = self.copy()
-        text.expand_tabs()
-        indent_line = f"{character}{' ' * (_indent_size - 1)}"
 
-        re_indent = re.compile(r"^( *)(.*)$")
-        new_lines: List[Text] = []
-        add_line = new_lines.append
-        blank_lines = 0
-        for line in text.split(allow_blank=True):
-            match = re_indent.match(line.plain)
-            if not match or not match.group(2):
-                blank_lines += 1
-                continue
-            indent = match.group(1)
-            full_indents, remaining_space = divmod(len(indent), _indent_size)
-            new_indent = f"{indent_line * full_indents}{' ' * remaining_space}"
-            line.plain = new_indent + line.plain[len(new_indent) :]
-            line.stylize(style, 0, len(new_indent))
-            if blank_lines:
-                new_lines.extend([Text(new_indent, style=style)] * blank_lines)
-                blank_lines = 0
-            add_line(line)
-        if blank_lines:
-            new_lines.extend([Text("", style=style)] * blank_lines)
+def _justify_lines_left(
+    lines: List["Text"], width: int, overflow: "OverflowMethod"
+) -> None:
+    for line in lines:
+        line.truncate(width, overflow=overflow, pad=True)
 
-        new_text = text.blank_copy("\n").join(new_lines)
-        return new_text
+
+def _justify_lines_center(
+    lines: List["Text"], width: int, overflow: "OverflowMethod"
+) -> None:
+    for line in lines:
+        line.rstrip()
+        line.truncate(width, overflow=overflow)
+        line.pad_left((width - cell_len(line.plain)) // 2)
+        line.pad_right(width - cell_len(line.plain))
+
+
+def _justify_lines_right(
+    lines: List["Text"], width: int, overflow: "OverflowMethod"
+) -> None:
+    for line in lines:
+        line.rstrip()
+        line.truncate(width, overflow=overflow)
+        line.pad_left(width - cell_len(line.plain))
+
+
+def _justify_line_full(console: "Console", line: "Text", width: int) -> "Text":
+    words = line.split(" ")
+    words_size = sum((cell_len(word.plain) for word in words))
+    num_spaces = len(words) - 1
+    spaces = [1 for _ in range(num_spaces)]
+    index = 0
+    if spaces:
+        while words_size + num_spaces < width:
+            spaces[len(spaces) - index - 1] += 1
+            num_spaces += 1
+            index = (index + 1) % len(spaces)
+    tokens: List["Text"] = []
+    for index, (word, next_word) in enumerate(zip_longest(words, words[1:])):
+        tokens.append(word)
+        if index < len(spaces):
+            style = word.get_style_at_offset(console, -1)
+            next_style = next_word.get_style_at_offset(console, 0)
+            space_style = style if style == next_style else line.style
+            tokens.append(Text(" " * spaces[index], style=space_style))
+    return Text("").join(tokens)
+
+
+def _apply_full_justify(lines: List["Text"], console: "Console", width: int) -> None:
+    for line_index, line in enumerate(lines):
+        if line_index == len(lines) - 1:
+            break
+        lines[line_index] = _justify_line_full(console, line, width)
+
+
+class Lines:
+    """A list subclass which can render to the console."""
+
+    def __init__(self, lines: Iterable["Text"] = ()) -> None:
+        self._lines: List["Text"] = list(lines)
+
+    def __repr__(self) -> str:
+        return f"Lines({self._lines!r})"
+
+    def __iter__(self) -> Iterator["Text"]:
+        return iter(self._lines)
+
+    @overload
+    def __getitem__(self, index: int) -> "Text":
+        ...
+
+    @overload
+    def __getitem__(self, index: slice) -> List["Text"]:
+        ...
+
+    def __getitem__(self, index: Union[slice, int]) -> Union["Text", List["Text"]]:
+        return self._lines[index]
+
+    def __setitem__(self, index: int, value: "Text") -> "Lines":
+        self._lines[index] = value
+        return self
+
+    def __len__(self) -> int:
+        return self._lines.__len__()
+
+    def __rich_console__(
+        self, console: "Console", options: "ConsoleOptions"
+    ) -> "RenderResult":
+        """Console render method to insert line-breaks."""
+        yield from self._lines
+
+    def append(self, line: "Text") -> None:
+        self._lines.append(line)
+
+    def extend(self, lines: Iterable["Text"]) -> None:
+        self._lines.extend(lines)
+
+    def pop(self, index: int = -1) -> "Text":
+        return self._lines.pop(index)
+
+    def justify(
+        self,
+        console: "Console",
+        width: int,
+        justify: "JustifyMethod" = "left",
+        overflow: "OverflowMethod" = "fold",
+    ) -> None:
+        """Justify and overflow text to a given width.
+
+        Args:
+            console (Console): Console instance.
+            width (int): Number of cells available per line.
+            justify (str, optional): Default justify method for text: "left", "center", "full" or "right". Defaults to "left".
+            overflow (str, optional): Default overflow for text: "crop", "fold", or "ellipsis". Defaults to "fold".
+
+        """
+        if justify == "left":
+            _justify_lines_left(self._lines, width, overflow)
+        elif justify == "center":
+            _justify_lines_center(self._lines, width, overflow)
+        elif justify == "right":
+            _justify_lines_right(self._lines, width, overflow)
+        elif justify == "full":
+            _apply_full_justify(self._lines, console, width)
+
+
+def _normalize_panel_label(value: TextType) -> Optional["Text"]:
+    if not value:
+        return None
+    label = Text.from_markup(value) if isinstance(value, str) else value.copy()
+    label.end = ""
+    label.plain = label.plain.replace("\n", " ")
+    label.no_wrap = True
+    label.expand_tabs()
+    label.pad(1)
+    return label
+
+
+def _align_panel_border_label(
+    console: "Console",
+    text: "Text",
+    width: int,
+    align: str,
+    character: str,
+    style: Style,
+) -> "Text":
+    from .cells import cell_len
+
+    text = text.copy()
+    text.truncate(width)
+    excess_space = width - cell_len(text.plain)
+    if text.style:
+        text.stylize(console.get_style(text.style))
+    if not excess_space:
+        return text
+    if align == "left":
+        return Text.assemble(text, (character * excess_space, style), no_wrap=True, end="")
+    if align == "center":
+        left = excess_space // 2
+        return Text.assemble(
+            (character * left, style),
+            text,
+            (character * (excess_space - left), style),
+            no_wrap=True,
+            end="",
+        )
+    return Text.assemble((character * excess_space, style), text, no_wrap=True, end="")
+
+
+_configure_highlight_bridge(Text, Text.copy, Span)
+_configure_panel_bridge(_normalize_panel_label, _align_panel_border_label)
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
-
-    text = Text(
-        """\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.\n"""
-    )
-    text.highlight_words(["Lorem"], "bold")
-    text.highlight_words(["ipsum"], "italic")
-
-    console = Console()
-
-    console.rule("justify='left'")
-    console.print(text, style="red")
-    console.print()
-
-    console.rule("justify='center'")
-    console.print(text, style="green", justify="center")
-    console.print()
-
-    console.rule("justify='right'")
-    console.print(text, style="blue", justify="right")
-    console.print()
-
-    console.rule("justify='full'")
-    console.print(text, style="magenta", justify="full")
-    console.print()
+    pass

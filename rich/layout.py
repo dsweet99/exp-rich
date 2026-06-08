@@ -17,9 +17,7 @@ from typing import (
 from ._ratio import ratio_resolve
 from .align import Align
 from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .highlighter import ReprHighlighter
 from .panel import Panel
-from .pretty import Pretty
 from .region import Region
 from .repr import Result, rich_repr
 from .segment import Segment
@@ -51,9 +49,10 @@ class NoSplitter(LayoutError):
 class _Placeholder:
     """An internal renderable used as a Layout placeholder."""
 
-    highlighter = ReprHighlighter()
-
     def __init__(self, layout: "Layout", style: StyleType = "") -> None:
+        from .highlighter import ReprHighlighter
+
+        self.highlighter = ReprHighlighter()
         self.layout = layout
         self.style = style
 
@@ -68,6 +67,8 @@ class _Placeholder:
             if layout.name
             else f"({width} x {height})"
         )
+        from .pretty import Pretty
+
         yield Panel(
             Align.center(Pretty(layout), vertical="middle"),
             style=self.style,
@@ -206,11 +207,10 @@ class Layout:
         """
         if self.name == name:
             return self
-        else:
-            for child in self._children:
-                named_layout = child.get(name)
-                if named_layout is not None:
-                    return named_layout
+        for child in self._children:
+            named_layout = child.get(name)
+            if named_layout is not None:
+                return named_layout
         return None
 
     def __getitem__(self, name: str) -> "Layout":
@@ -227,6 +227,8 @@ class Layout:
         from rich.tree import Tree
 
         def summary(layout: "Layout") -> Table:
+            from .pretty import Pretty
+
             icon = layout.splitter.get_tree_icon()
 
             table = Table.grid(padding=(0, 1, 0, 0))
@@ -414,29 +416,3 @@ class Layout:
                 yield from layout_row
                 yield new_line
 
-
-if __name__ == "__main__":
-    from rich.console import Console
-
-    console = Console()
-    layout = Layout()
-
-    layout.split_column(
-        Layout(name="header", size=3),
-        Layout(ratio=1, name="main"),
-        Layout(size=10, name="footer"),
-    )
-
-    layout["main"].split_row(Layout(name="side"), Layout(name="body", ratio=2))
-
-    layout["body"].split_row(Layout(name="content", ratio=2), Layout(name="s2"))
-
-    layout["s2"].split_column(
-        Layout(name="top"), Layout(name="middle"), Layout(name="bottom")
-    )
-
-    layout["side"].split_column(Layout(layout.tree, name="left1"), Layout(name="left2"))
-
-    layout["content"].update("foo")
-
-    console.print(layout)

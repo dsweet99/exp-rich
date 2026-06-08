@@ -28,14 +28,7 @@ COLUMN_DATA = [
 ]
 
 
-def render():
-    console = Console(file=io.StringIO(), width=100, legacy_windows=False)
-
-    console.rule("empty")
-    empty_columns = Columns([])
-    console.print(empty_columns)
-    columns = Columns(COLUMN_DATA)
-    columns.add_renderable("Myrmecophaga tridactyla")
+def _render_column_layouts(console, columns):
     console.rule("optimal")
     console.print(columns)
     console.rule("optimal, expand")
@@ -56,6 +49,16 @@ def render():
     columns.width = 16
     columns.expand = False
     console.print(columns)
+
+
+def render():
+    console = Console(file=io.StringIO(), width=100, legacy_windows=False)
+    console.rule("empty")
+    empty_columns = Columns([])
+    console.print(empty_columns)
+    columns = Columns(COLUMN_DATA)
+    columns.add_renderable("Myrmecophaga tridactyla")
+    _render_column_layouts(console, columns)
     console.print()
     render_result = console.file.getvalue()
     print(render_result)

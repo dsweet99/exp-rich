@@ -40,16 +40,17 @@ if TYPE_CHECKING:
     # Can be replaced with `from typing import Self` in Python 3.11+
     from typing_extensions import Self  # pragma: no cover
 
+    from .highlighter import Highlighter
+
 from . import filesize, get_console
 from .console import Console, Group, JustifyMethod, RenderableType
-from .highlighter import Highlighter
-from .jupyter import JupyterMixin
 from .live import Live
 from .progress_bar import ProgressBar
 from .spinner import Spinner
 from .style import StyleType
 from .table import Column, Table
 from .text import Text, TextType
+from ._jupyter_mixin import JupyterMixin
 
 TaskID = NewType("TaskID", int)
 
@@ -79,7 +80,7 @@ class _TrackThread(Thread):
         update_period = self.update_period
         last_completed = 0
         wait = self.done.wait
-        while not wait(update_period) and self.progress.live.is_started:
+        while not wait(update_period) and self.progress.live._started:
             completed = self.completed
             if last_completed != completed:
                 advance(task_id, completed - last_completed)
@@ -518,6 +519,19 @@ class ProgressColumn(ABC):
         """Get a table column, used to build tasks table."""
         return self._table_column or Column()
 
+    def _cached_renderable(
+        self, task: "Task", current_time: float
+    ) -> Optional[RenderableType]:
+        if self.max_refresh is None or task.completed:
+            return None
+        try:
+            timestamp, renderable = self._renderable_cache[task.id]
+        except KeyError:
+            return None
+        if timestamp + self.max_refresh > current_time:
+            return renderable
+        return None
+
     def __call__(self, task: "Task") -> RenderableType:
         """Called by the Progress object to return a renderable for the given task.
 
@@ -528,14 +542,9 @@ class ProgressColumn(ABC):
             RenderableType: Anything renderable (including str).
         """
         current_time = task.get_time()
-        if self.max_refresh is not None and not task.completed:
-            try:
-                timestamp, renderable = self._renderable_cache[task.id]
-            except KeyError:
-                pass
-            else:
-                if timestamp + self.max_refresh > current_time:
-                    return renderable
+        cached = self._cached_renderable(task, current_time)
+        if cached is not None:
+            return cached
 
         renderable = self.render(task)
         self._renderable_cache[task.id] = (current_time, renderable)
@@ -1058,7 +1067,43 @@ class Task:
         self.finished_speed = None
 
 
-class Progress(JupyterMixin):
+def _progress_normalize_open_mode(
+    mode: str, buffering: int
+) -> tuple[str, int, bool]:
+    """Normalize mode and buffering for Progress.open."""
+    _mode = "".join(sorted(mode, reverse=False))
+    if _mode not in ("br", "rt", "r"):
+        raise ValueError(f"invalid mode {mode!r}")
+    line_buffering = buffering == 1
+    if _mode == "br" and buffering == 1:
+        warnings.warn(
+            "line buffering (buffering=1) isn't supported in binary mode, "
+            "the default buffer size will be used",
+            RuntimeWarning,
+        )
+        buffering = -1
+    elif _mode in ("rt", "r"):
+        if buffering == 0:
+            raise ValueError("can't have unbuffered text I/O")
+        if buffering == 1:
+            buffering = -1
+    return _mode, buffering, line_buffering
+
+
+def _progress_trim_samples(
+    task: "Task", current_time: float, speed_estimate_period: float, update_completed: float
+) -> None:
+    """Update progress samples for speed estimation."""
+    old_sample_time = current_time - speed_estimate_period
+    _progress = task._progress
+    popleft = _progress.popleft
+    while _progress and _progress[0].timestamp < old_sample_time:
+        popleft()
+    if update_completed > 0:
+        _progress.append(ProgressSample(current_time, update_completed))
+
+
+class Progress:
     """Renders an auto-updating progress bar(s).
 
     Args:
@@ -1073,6 +1118,7 @@ class Progress(JupyterMixin):
         disable (bool, optional): Disable progress display. Defaults to False
         expand (bool, optional): Expand tasks table to fit width. Defaults to False.
     """
+
 
     def __init__(
         self,
@@ -1341,23 +1387,7 @@ class Progress(JupyterMixin):
             ValueError: When an invalid mode is given.
         """
         # normalize the mode (always rb, rt)
-        _mode = "".join(sorted(mode, reverse=False))
-        if _mode not in ("br", "rt", "r"):
-            raise ValueError(f"invalid mode {mode!r}")
-
-        # patch buffering to provide the same behaviour as the builtin `open`
-        line_buffering = buffering == 1
-        if _mode == "br" and buffering == 1:
-            warnings.warn(
-                "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
-                RuntimeWarning,
-            )
-            buffering = -1
-        elif _mode in ("rt", "r"):
-            if buffering == 0:
-                raise ValueError("can't have unbuffered text I/O")
-            elif buffering == 1:
-                buffering = -1
+        _mode, buffering, line_buffering = _progress_normalize_open_mode(mode, buffering)
 
         # attempt to get the total with `os.stat`
         if total is None:
@@ -1457,14 +1487,9 @@ class Progress(JupyterMixin):
             update_completed = task.completed - completed_start
 
             current_time = self.get_time()
-            old_sample_time = current_time - self.speed_estimate_period
-            _progress = task._progress
-
-            popleft = _progress.popleft
-            while _progress and _progress[0].timestamp < old_sample_time:
-                popleft()
-            if update_completed > 0:
-                _progress.append(ProgressSample(current_time, update_completed))
+            _progress_trim_samples(
+                task, current_time, self.speed_estimate_period, update_completed
+            )
             if (
                 task.total is not None
                 and task.completed >= task.total
@@ -1546,7 +1571,7 @@ class Progress(JupyterMixin):
 
     def refresh(self) -> None:
         """Refresh (render) the progress information."""
-        if not self.disable and self.live.is_started:
+        if not self.disable and self.live._started:
             self.live.refresh()
 
     def get_renderable(self) -> RenderableType:
@@ -1650,67 +1675,3 @@ class Progress(JupyterMixin):
         with self._lock:
             del self._tasks[task_id]
 
-
-if __name__ == "__main__":  # pragma: no coverage
-    import random
-    import time
-
-    from .panel import Panel
-    from .rule import Rule
-    from .syntax import Syntax
-    from .table import Table
-
-    syntax = Syntax(
-        '''def loop_last(values: Iterable[T]) -> Iterable[Tuple[bool, T]]:
-    """Iterate and generate a tuple with a flag for last value."""
-    iter_values = iter(values)
-    try:
-        previous_value = next(iter_values)
-    except StopIteration:
-        return
-    for value in iter_values:
-        yield False, previous_value
-        previous_value = value
-    yield True, previous_value''',
-        "python",
-        line_numbers=True,
-    )
-
-    table = Table("foo", "bar", "baz")
-    table.add_row("1", "2", "3")
-
-    progress_renderables = [
-        "Text may be printed while the progress bars are rendering.",
-        Panel("In fact, [i]any[/i] renderable will work"),
-        "Such as [magenta]tables[/]...",
-        table,
-        "Pretty printed structures...",
-        {"type": "example", "text": "Pretty printed"},
-        "Syntax...",
-        syntax,
-        Rule("Give it a try!"),
-    ]
-
-    from itertools import cycle
-
-    examples = cycle(progress_renderables)
-
-    console = Console(record=True)
-
-    with Progress(
-        SpinnerColumn(),
-        *Progress.get_default_columns(),
-        TimeElapsedColumn(),
-        console=console,
-        transient=False,
-    ) as progress:
-        task1 = progress.add_task("[red]Downloading", total=1000)
-        task2 = progress.add_task("[green]Processing", total=1000)
-        task3 = progress.add_task("[yellow]Thinking", total=None)
-
-        while not progress.finished:
-            progress.update(task1, advance=0.5)
-            progress.update(task2, advance=0.3)
-            time.sleep(0.01)
-            if random.randint(0, 100) < 1:
-                progress.log(next(examples))

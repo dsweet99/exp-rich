@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field, replace
 from typing import (
     TYPE_CHECKING,
+    Any,
     Dict,
     Iterable,
     List,
@@ -16,13 +17,15 @@ from ._loop import loop_first_last, loop_last
 from ._pick import pick_bool
 from ._ratio import ratio_distribute, ratio_reduce
 from .align import VerticalAlignMethod
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement
 from .padding import Padding, PaddingDimensions
 from .protocol import is_renderable
 from .segment import Segment
 from .style import Style, StyleType
-from .text import Text, TextType
+from ._highlight_bridge import text_from_str
+
+TextType = Union[str, Any]
 
 if TYPE_CHECKING:
     from .console import (
@@ -150,6 +153,442 @@ class _Cell(NamedTuple):
     """Cell vertical alignment."""
 
 
+def _table_align_cell(
+    cell: List[List[Segment]],
+    vertical: VerticalAlignMethod,
+    width: int,
+    row_height: int,
+    style: Style,
+    header_row: bool,
+    footer_row: bool,
+    _Segment,
+) -> List[List[Segment]]:
+    if header_row:
+        vertical = "bottom"
+    elif footer_row:
+        vertical = "top"
+    if vertical == "top":
+        return _Segment.align_top(cell, width, row_height, style)
+    if vertical == "middle":
+        return _Segment.align_middle(cell, width, row_height, style)
+    return _Segment.align_bottom(cell, width, row_height, style)
+
+
+def _table_collect_row_cells(
+    table: "Table",
+    console: "Console",
+    options: "ConsoleOptions",
+    widths: List[int],
+    row_cell: Tuple["_Cell", ...],
+    columns,
+    header_row: bool,
+    footer_row: bool,
+    get_row_style,
+    get_style,
+    index: int,
+    show_header: bool,
+) -> Tuple[List[List[List[Segment]]], Style, int]:
+    max_height = 1
+    cells: List[List[List[Segment]]] = []
+    if header_row or footer_row:
+        row_style = Style.null()
+    else:
+        row_style = get_style(
+            get_row_style(console, index - 1 if show_header else index)
+        )
+    for width, cell, column in zip(widths, row_cell, columns):
+        render_options = options.update(
+            width=width,
+            justify=column.justify,
+            no_wrap=column.no_wrap,
+            overflow=column.overflow,
+            height=None,
+            highlight=column.highlight,
+        )
+        lines = console.render_lines(
+            cell.renderable,
+            render_options,
+            style=get_style(cell.style) + row_style,
+        )
+        max_height = max(max_height, len(lines))
+        cells.append(lines)
+    row_height = max(len(cell) for cell in cells)
+    _Segment = Segment
+    cells[:] = [
+        _Segment.set_shape(
+            _table_align_cell(
+                cell,
+                _cell.vertical,
+                width,
+                row_height,
+                get_style(_cell.style) + row_style,
+                header_row,
+                footer_row,
+                _Segment,
+            ),
+            width,
+            max_height,
+        )
+        for width, _cell, cell, column in zip(widths, row_cell, cells, columns)
+    ]
+    return cells, row_style, max_height
+
+
+def _table_yield_box_row(
+    cells,
+    max_height: int,
+    box_segments,
+    first: bool,
+    last: bool,
+    show_edge: bool,
+    row_style: Style,
+    _Segment,
+    new_line: Segment,
+) -> Iterable[Segment]:
+    left, right, _divider = box_segments[0 if first else (2 if last else 1)]
+    divider = (
+        _divider
+        if _divider.text.strip()
+        else _Segment(_divider.text, row_style.background_style + _divider.style)
+    )
+    for line_no in range(max_height):
+        if show_edge:
+            yield left
+        for last_cell, rendered_cell in loop_last(cells):
+            yield from rendered_cell[line_no]
+            if not last_cell:
+                yield divider
+        if show_edge:
+            yield right
+        yield new_line
+
+
+def _table_yield_plain_row(cells, max_height: int, new_line: Segment) -> Iterable[Segment]:
+    for line_no in range(max_height):
+        for rendered_cell in cells:
+            yield from rendered_cell[line_no]
+        yield new_line
+
+
+def _table_row_separator(
+    table, _box, widths, border_style, _Segment, new_line,
+    last, index, row_cells, header_row, row,
+) -> Iterable[Segment]:
+    end_section = row and row.end_section
+    if not _box or not (table.show_lines or table.leading or end_section):
+        return
+    if last or (table.show_footer and index >= len(row_cells) - 2) or (table.show_header and header_row):
+        return
+    if table.leading:
+        yield _Segment(_box.get_row(widths, "mid", edge=table.show_edge) * table.leading, border_style)
+    else:
+        yield _Segment(_box.get_row(widths, "row", edge=table.show_edge), border_style)
+    yield new_line
+
+
+def _table_render_one_row(
+    table: "Table",
+    console: "Console",
+    options: "ConsoleOptions",
+    widths: List[int],
+    index: int,
+    first: bool,
+    last: bool,
+    row_cell: Tuple["_Cell", ...],
+    row_cells: List[Tuple["_Cell", ...]],
+    _box,
+    box_segments,
+    border_style: Style,
+    _Segment,
+    new_line: Segment,
+) -> Iterable[Segment]:
+    header_row = first and table.show_header
+    footer_row = last and table.show_footer
+    row = (
+        table.rows[index - table.show_header]
+        if (not header_row and not footer_row)
+        else None
+    )
+    cells, row_style, max_height = _table_collect_row_cells(
+        table,
+        console,
+        options,
+        widths,
+        row_cell,
+        table.columns,
+        header_row,
+        footer_row,
+        table.get_row_style,
+        console.get_style,
+        index,
+        table.show_header,
+    )
+    if _box:
+        if last and table.show_footer:
+            yield _Segment(_box.get_row(widths, "foot", edge=table.show_edge), border_style)
+            yield new_line
+        yield from _table_yield_box_row(
+            cells,
+            max_height,
+            box_segments,
+            first,
+            last,
+            table.show_edge,
+            row_style,
+            _Segment,
+            new_line,
+        )
+    else:
+        yield from _table_yield_plain_row(cells, max_height, new_line)
+    if _box and first and table.show_header:
+        yield _Segment(_box.get_row(widths, "head", edge=table.show_edge), border_style)
+        yield new_line
+    yield from _table_row_separator(
+        table, _box, widths, border_style, _Segment, new_line,
+        last, index, row_cells, header_row, row,
+    )
+
+
+def render_table_body(
+    table: "Table",
+    console: "Console",
+    options: "ConsoleOptions",
+    widths: List[int],
+) -> "RenderResult":
+    """Render table rows."""
+    table_style = console.get_style(table.style or "")
+    border_style = table_style + console.get_style(table.border_style or "")
+    _column_cells = (
+        table._get_cells(console, column_index, column)
+        for column_index, column in enumerate(table.columns)
+    )
+    row_cells: List[Tuple["_Cell", ...]] = list(zip(*_column_cells))
+    _box = (
+        table.box.substitute(options, safe=pick_bool(table.safe_box, console.safe_box))
+        if table.box
+        else None
+    )
+    _box = _box.get_plain_headed_box() if _box and not table.show_header else _box
+    new_line = Segment.line()
+    _Segment = Segment
+
+    if _box:
+        box_segments = [
+            (
+                _Segment(_box.head_left, border_style),
+                _Segment(_box.head_right, border_style),
+                _Segment(_box.head_vertical, border_style),
+            ),
+            (
+                _Segment(_box.mid_left, border_style),
+                _Segment(_box.mid_right, border_style),
+                _Segment(_box.mid_vertical, border_style),
+            ),
+            (
+                _Segment(_box.foot_left, border_style),
+                _Segment(_box.foot_right, border_style),
+                _Segment(_box.foot_vertical, border_style),
+            ),
+        ]
+        if table.show_edge:
+            yield _Segment(_box.get_top(widths), border_style)
+            yield new_line
+    else:
+        box_segments = []
+
+    for index, (first, last, row_cell) in enumerate(loop_first_last(row_cells)):
+        yield from _table_render_one_row(
+            table,
+            console,
+            options,
+            widths,
+            index,
+            first,
+            last,
+            row_cell,
+            row_cells,
+            _box,
+            box_segments,
+            border_style,
+            _Segment,
+            new_line,
+        )
+
+    if _box and table.show_edge:
+        yield _Segment(_box.get_bottom(widths), border_style)
+        yield new_line
+
+
+def _table_apply_options(table: "Table", **options: object) -> None:
+    table.title = options["title"]
+    table.caption = options["caption"]
+    table.width = options["width"]
+    table.min_width = options["min_width"]
+    table.box = options["box"]
+    table.safe_box = options["safe_box"]
+    table._padding = Padding.unpack(options["padding"])
+    table.pad_edge = options["pad_edge"]
+    table._expand = options["expand"]
+    table.show_header = options["show_header"]
+    table.show_footer = options["show_footer"]
+    table.show_edge = options["show_edge"]
+    table.show_lines = options["show_lines"]
+    table.leading = options["leading"]
+    table.collapse_padding = options["collapse_padding"]
+    table.style = options["style"]
+    table.header_style = options["header_style"] or ""
+    table.footer_style = options["footer_style"] or ""
+    table.border_style = options["border_style"]
+    table.title_style = options["title_style"]
+    table.caption_style = options["caption_style"]
+    table.title_justify = options["title_justify"]
+    table.caption_justify = options["caption_justify"]
+    table.highlight = options["highlight"]
+    table.row_styles = list(options["row_styles"] or [])
+
+
+def _table_add_headers(table: "Table", headers: Sequence[Union["Column", str]]) -> None:
+    append_column = table.columns.append
+    for header in headers:
+        if isinstance(header, str):
+            table.add_column(header=header)
+        else:
+            header._index = len(table.columns)
+            append_column(header)
+
+
+def _table_build_raw_cells(
+    table: "Table",
+    console: "Console",
+    column: "Column",
+) -> List[Tuple[StyleType, "RenderableType"]]:
+    raw_cells: List[Tuple[StyleType, "RenderableType"]] = []
+    append = raw_cells.append
+    get_style = console.get_style
+    if table.show_header:
+        header_style = get_style(table.header_style or "") + get_style(column.header_style)
+        append((header_style, column.header))
+    cell_style = get_style(column.style or "")
+    for cell in column.cells:
+        append((cell_style, cell))
+    if table.show_footer:
+        footer_style = get_style(table.footer_style or "") + get_style(column.footer_style)
+        append((footer_style, column.footer))
+    return raw_cells
+
+
+def _table_apply_flexible_widths(
+    table: "Table",
+    columns,
+    width_ranges,
+    widths: List[int],
+    max_width: int,
+) -> None:
+    if not table.expand:
+        return
+    ratios = [col.ratio or 0 for col in columns if col.flexible]
+    if not any(ratios):
+        return
+    fixed_widths = [
+        0 if column.flexible else _range.maximum
+        for _range, column in zip(width_ranges, columns)
+    ]
+    flex_minimum = [
+        (column.width or 1) + table._get_padding_width(column._index)
+        for column in columns
+        if column.flexible
+    ]
+    flexible_width = max_width - sum(fixed_widths)
+    flex_widths = ratio_distribute(flexible_width, ratios, flex_minimum)
+    iter_flex_widths = iter(flex_widths)
+    for index, column in enumerate(columns):
+        if column.flexible:
+            widths[index] = fixed_widths[index] + next(iter_flex_widths)
+
+
+def _table_shrink_overflow(
+    table: "Table",
+    console: "Console",
+    options: "ConsoleOptions",
+    columns,
+    widths: List[int],
+    max_width: int,
+) -> List[int]:
+    table_width = sum(widths)
+    if table_width <= max_width:
+        return widths
+    widths = table._collapse_widths(
+        widths,
+        [(column.width is None and not column.no_wrap) for column in columns],
+        max_width,
+    )
+    table_width = sum(widths)
+    if table_width > max_width:
+        excess_width = table_width - max_width
+        widths = ratio_reduce(excess_width, [1] * len(widths), widths, widths)
+        table_width = sum(widths)
+    width_ranges = [
+        table._measure_column(console, options.update_width(width), column)
+        for width, column in zip(widths, columns)
+    ]
+    return [_range.maximum or 0 for _range in width_ranges]
+
+
+def _table_pad_to_min_width(
+    table: "Table",
+    widths: List[int],
+    max_width: int,
+    extra_width: int,
+) -> List[int]:
+    table_width = sum(widths)
+    if not (
+        (table_width < max_width and table.expand)
+        or (table.min_width is not None and table_width < (table.min_width - extra_width))
+    ):
+        return widths
+    _max_width = (
+        max_width
+        if table.min_width is None
+        else min(table.min_width - extra_width, max_width)
+    )
+    pad_widths = ratio_distribute(_max_width - table_width, widths)
+    return [_width + pad for _width, pad in zip(widths, pad_widths)]
+
+
+def _table_cell_padding(
+    padding: Tuple[int, int, int, int],
+    *,
+    collapse_padding: bool,
+    pad_edge: bool,
+    first_column: bool,
+    last_column: bool,
+    first_row: bool,
+    last_row: bool,
+    cache: Dict[Tuple[bool, bool], Tuple[int, int, int, int]],
+) -> Tuple[int, int, int, int]:
+    cached = cache.get((first_row, last_row))
+    if cached:
+        return cached
+    top, right, bottom, left = padding
+    if collapse_padding:
+        if not first_column:
+            left = max(0, left - right)
+        if not last_row:
+            bottom = max(0, top - bottom)
+    if not pad_edge:
+        if first_column:
+            left = 0
+        if last_column:
+            right = 0
+        if first_row:
+            top = 0
+        if last_row:
+            bottom = 0
+    result = (top, right, bottom, left)
+    cache[(first_row, last_row)] = result
+    return result
+
+
 class Table(JupyterMixin):
     """A console renderable to draw a table.
 
@@ -214,40 +653,37 @@ class Table(JupyterMixin):
         caption_justify: "JustifyMethod" = "center",
         highlight: bool = False,
     ) -> None:
-        self.columns: List[Column] = []
-        self.rows: List[Row] = []
-        self.title = title
-        self.caption = caption
-        self.width = width
-        self.min_width = min_width
-        self.box = box
-        self.safe_box = safe_box
-        self._padding = Padding.unpack(padding)
-        self.pad_edge = pad_edge
-        self._expand = expand
-        self.show_header = show_header
-        self.show_footer = show_footer
-        self.show_edge = show_edge
-        self.show_lines = show_lines
-        self.leading = leading
-        self.collapse_padding = collapse_padding
-        self.style = style
-        self.header_style = header_style or ""
-        self.footer_style = footer_style or ""
-        self.border_style = border_style
-        self.title_style = title_style
-        self.caption_style = caption_style
-        self.title_justify: "JustifyMethod" = title_justify
-        self.caption_justify: "JustifyMethod" = caption_justify
-        self.highlight = highlight
-        self.row_styles: Sequence[StyleType] = list(row_styles or [])
-        append_column = self.columns.append
-        for header in headers:
-            if isinstance(header, str):
-                self.add_column(header=header)
-            else:
-                header._index = len(self.columns)
-                append_column(header)
+        self.columns = []
+        self.rows = []
+        _table_apply_options(
+            self,
+            title=title,
+            caption=caption,
+            width=width,
+            min_width=min_width,
+            box=box,
+            safe_box=safe_box,
+            padding=padding,
+            collapse_padding=collapse_padding,
+            pad_edge=pad_edge,
+            expand=expand,
+            show_header=show_header,
+            show_footer=show_footer,
+            show_edge=show_edge,
+            show_lines=show_lines,
+            leading=leading,
+            style=style,
+            row_styles=row_styles,
+            header_style=header_style,
+            footer_style=footer_style,
+            border_style=border_style,
+            title_style=title_style,
+            caption_style=caption_style,
+            title_justify=title_justify,
+            caption_justify=caption_justify,
+            highlight=highlight,
+        )
+        _table_add_headers(self, headers)
 
     @classmethod
     def grid(
@@ -452,7 +888,7 @@ class Table(JupyterMixin):
             if index == len(columns):
                 column = Column(_index=index, highlight=self.highlight)
                 for _ in self.rows:
-                    add_cell(column, Text(""))
+                    add_cell(column, text_from_str(""))
                 self.columns.append(column)
             else:
                 column = columns[index]
@@ -530,60 +966,11 @@ class Table(JupyterMixin):
             self._measure_column(console, options, column) for column in columns
         ]
         widths = [_range.maximum or 1 for _range in width_ranges]
-
-        get_padding_width = self._get_padding_width
-        extra_width = self._extra_width
-        if self.expand:
-            ratios = [col.ratio or 0 for col in columns if col.flexible]
-            if any(ratios):
-                fixed_widths = [
-                    0 if column.flexible else _range.maximum
-                    for _range, column in zip(width_ranges, columns)
-                ]
-                flex_minimum = [
-                    (column.width or 1) + get_padding_width(column._index)
-                    for column in columns
-                    if column.flexible
-                ]
-                flexible_width = max_width - sum(fixed_widths)
-                flex_widths = ratio_distribute(flexible_width, ratios, flex_minimum)
-                iter_flex_widths = iter(flex_widths)
-                for index, column in enumerate(columns):
-                    if column.flexible:
-                        widths[index] = fixed_widths[index] + next(iter_flex_widths)
-        table_width = sum(widths)
-
-        if table_width > max_width:
-            widths = self._collapse_widths(
-                widths,
-                [(column.width is None and not column.no_wrap) for column in columns],
-                max_width,
-            )
-            table_width = sum(widths)
-            # last resort, reduce columns evenly
-            if table_width > max_width:
-                excess_width = table_width - max_width
-                widths = ratio_reduce(excess_width, [1] * len(widths), widths, widths)
-                table_width = sum(widths)
-
-            width_ranges = [
-                self._measure_column(console, options.update_width(width), column)
-                for width, column in zip(widths, columns)
-            ]
-            widths = [_range.maximum or 0 for _range in width_ranges]
-
-        if (table_width < max_width and self.expand) or (
-            self.min_width is not None and table_width < (self.min_width - extra_width)
-        ):
-            _max_width = (
-                max_width
-                if self.min_width is None
-                else min(self.min_width - extra_width, max_width)
-            )
-            pad_widths = ratio_distribute(_max_width - table_width, widths)
-            widths = [_width + pad for _width, pad in zip(widths, pad_widths)]
-
-        return widths
+        _table_apply_flexible_widths(self, columns, width_ranges, widths, max_width)
+        widths = _table_shrink_overflow(
+            self, console, options, columns, widths, max_width
+        )
+        return _table_pad_to_min_width(self, widths, max_width, self._extra_width)
 
     @classmethod
     def _collapse_widths(
@@ -639,54 +1026,26 @@ class Table(JupyterMixin):
 
         _padding_cache: Dict[Tuple[bool, bool], Tuple[int, int, int, int]] = {}
 
-        def get_padding(first_row: bool, last_row: bool) -> Tuple[int, int, int, int]:
-            cached = _padding_cache.get((first_row, last_row))
-            if cached:
-                return cached
-            top, right, bottom, left = padding
-
-            if collapse_padding:
-                if not first_column:
-                    left = max(0, left - right)
-                if not last_row:
-                    bottom = max(0, top - bottom)
-
-            if not pad_edge:
-                if first_column:
-                    left = 0
-                if last_column:
-                    right = 0
-                if first_row:
-                    top = 0
-                if last_row:
-                    bottom = 0
-            _padding = (top, right, bottom, left)
-            _padding_cache[(first_row, last_row)] = _padding
-            return _padding
-
-        raw_cells: List[Tuple[StyleType, "RenderableType"]] = []
-        _append = raw_cells.append
-        get_style = console.get_style
-        if self.show_header:
-            header_style = get_style(self.header_style or "") + get_style(
-                column.header_style
-            )
-            _append((header_style, column.header))
-        cell_style = get_style(column.style or "")
-        for cell in column.cells:
-            _append((cell_style, cell))
-        if self.show_footer:
-            footer_style = get_style(self.footer_style or "") + get_style(
-                column.footer_style
-            )
-            _append((footer_style, column.footer))
+        raw_cells = _table_build_raw_cells(self, console, column)
 
         if any_padding:
             _Padding = Padding
             for first, last, (style, renderable) in loop_first_last(raw_cells):
                 yield _Cell(
                     style,
-                    _Padding(renderable, get_padding(first, last)),
+                    _Padding(
+                        renderable,
+                        _table_cell_padding(
+                            padding,
+                            collapse_padding=collapse_padding,
+                            pad_edge=pad_edge,
+                            first_column=first_column,
+                            last_column=last_column,
+                            first_row=first,
+                            last_row=last,
+                            cache=_padding_cache,
+                        ),
+                    ),
                     getattr(renderable, "vertical", None) or column.vertical,
                 )
         else:
@@ -755,261 +1114,5 @@ class Table(JupyterMixin):
     def _render(
         self, console: "Console", options: "ConsoleOptions", widths: List[int]
     ) -> "RenderResult":
-        table_style = console.get_style(self.style or "")
+        yield from render_table_body(self, console, options, widths)
 
-        border_style = table_style + console.get_style(self.border_style or "")
-        _column_cells = (
-            self._get_cells(console, column_index, column)
-            for column_index, column in enumerate(self.columns)
-        )
-
-        row_cells: List[Tuple[_Cell, ...]] = list(zip(*_column_cells))
-        _box = (
-            self.box.substitute(
-                options, safe=pick_bool(self.safe_box, console.safe_box)
-            )
-            if self.box
-            else None
-        )
-        _box = _box.get_plain_headed_box() if _box and not self.show_header else _box
-
-        new_line = Segment.line()
-
-        columns = self.columns
-        show_header = self.show_header
-        show_footer = self.show_footer
-        show_edge = self.show_edge
-        show_lines = self.show_lines
-        leading = self.leading
-
-        _Segment = Segment
-        if _box:
-            box_segments = [
-                (
-                    _Segment(_box.head_left, border_style),
-                    _Segment(_box.head_right, border_style),
-                    _Segment(_box.head_vertical, border_style),
-                ),
-                (
-                    _Segment(_box.mid_left, border_style),
-                    _Segment(_box.mid_right, border_style),
-                    _Segment(_box.mid_vertical, border_style),
-                ),
-                (
-                    _Segment(_box.foot_left, border_style),
-                    _Segment(_box.foot_right, border_style),
-                    _Segment(_box.foot_vertical, border_style),
-                ),
-            ]
-            if show_edge:
-                yield _Segment(_box.get_top(widths), border_style)
-                yield new_line
-        else:
-            box_segments = []
-
-        get_row_style = self.get_row_style
-        get_style = console.get_style
-
-        for index, (first, last, row_cell) in enumerate(loop_first_last(row_cells)):
-            header_row = first and show_header
-            footer_row = last and show_footer
-            row = (
-                self.rows[index - show_header]
-                if (not header_row and not footer_row)
-                else None
-            )
-            max_height = 1
-            cells: List[List[List[Segment]]] = []
-            if header_row or footer_row:
-                row_style = Style.null()
-            else:
-                row_style = get_style(
-                    get_row_style(console, index - 1 if show_header else index)
-                )
-            for width, cell, column in zip(widths, row_cell, columns):
-                render_options = options.update(
-                    width=width,
-                    justify=column.justify,
-                    no_wrap=column.no_wrap,
-                    overflow=column.overflow,
-                    height=None,
-                    highlight=column.highlight,
-                )
-                lines = console.render_lines(
-                    cell.renderable,
-                    render_options,
-                    style=get_style(cell.style) + row_style,
-                )
-                max_height = max(max_height, len(lines))
-                cells.append(lines)
-
-            row_height = max(len(cell) for cell in cells)
-
-            def align_cell(
-                cell: List[List[Segment]],
-                vertical: "VerticalAlignMethod",
-                width: int,
-                style: Style,
-            ) -> List[List[Segment]]:
-                if header_row:
-                    vertical = "bottom"
-                elif footer_row:
-                    vertical = "top"
-
-                if vertical == "top":
-                    return _Segment.align_top(cell, width, row_height, style)
-                elif vertical == "middle":
-                    return _Segment.align_middle(cell, width, row_height, style)
-                return _Segment.align_bottom(cell, width, row_height, style)
-
-            cells[:] = [
-                _Segment.set_shape(
-                    align_cell(
-                        cell,
-                        _cell.vertical,
-                        width,
-                        get_style(_cell.style) + row_style,
-                    ),
-                    width,
-                    max_height,
-                )
-                for width, _cell, cell, column in zip(widths, row_cell, cells, columns)
-            ]
-
-            if _box:
-                if last and show_footer:
-                    yield _Segment(
-                        _box.get_row(widths, "foot", edge=show_edge), border_style
-                    )
-                    yield new_line
-                left, right, _divider = box_segments[0 if first else (2 if last else 1)]
-
-                # If the column divider is whitespace also style it with the row background
-                divider = (
-                    _divider
-                    if _divider.text.strip()
-                    else _Segment(
-                        _divider.text, row_style.background_style + _divider.style
-                    )
-                )
-                for line_no in range(max_height):
-                    if show_edge:
-                        yield left
-                    for last_cell, rendered_cell in loop_last(cells):
-                        yield from rendered_cell[line_no]
-                        if not last_cell:
-                            yield divider
-                    if show_edge:
-                        yield right
-                    yield new_line
-            else:
-                for line_no in range(max_height):
-                    for rendered_cell in cells:
-                        yield from rendered_cell[line_no]
-                    yield new_line
-            if _box and first and show_header:
-                yield _Segment(
-                    _box.get_row(widths, "head", edge=show_edge), border_style
-                )
-                yield new_line
-            end_section = row and row.end_section
-            if _box and (show_lines or leading or end_section):
-                if (
-                    not last
-                    and not (show_footer and index >= len(row_cells) - 2)
-                    and not (show_header and header_row)
-                ):
-                    if leading:
-                        yield _Segment(
-                            _box.get_row(widths, "mid", edge=show_edge) * leading,
-                            border_style,
-                        )
-                    else:
-                        yield _Segment(
-                            _box.get_row(widths, "row", edge=show_edge), border_style
-                        )
-                    yield new_line
-
-        if _box and show_edge:
-            yield _Segment(_box.get_bottom(widths), border_style)
-            yield new_line
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
-    from rich.highlighter import ReprHighlighter
-
-    from ._timer import timer
-
-    with timer("Table render"):
-        table = Table(
-            title="Star Wars Movies",
-            caption="Rich example table",
-            caption_justify="right",
-        )
-
-        table.add_column(
-            "Released", header_style="bright_cyan", style="cyan", no_wrap=True
-        )
-        table.add_column("Title", style="magenta")
-        table.add_column("Box Office", justify="right", style="green")
-
-        table.add_row(
-            "Dec 20, 2019",
-            "Star Wars: The Rise of Skywalker",
-            "$952,110,690",
-        )
-        table.add_row("May 25, 2018", "Solo: A Star Wars Story", "$393,151,347")
-        table.add_row(
-            "Dec 15, 2017",
-            "Star Wars Ep. V111: The Last Jedi",
-            "$1,332,539,889",
-            style="on black",
-            end_section=True,
-        )
-        table.add_row(
-            "Dec 16, 2016",
-            "Rogue One: A Star Wars Story",
-            "$1,332,439,889",
-        )
-
-        def header(text: str) -> None:
-            console.print()
-            console.rule(highlight(text))
-            console.print()
-
-        console = Console()
-        highlight = ReprHighlighter()
-        header("Example Table")
-        console.print(table, justify="center")
-
-        table.expand = True
-        header("expand=True")
-        console.print(table)
-
-        table.width = 50
-        header("width=50")
-
-        console.print(table, justify="center")
-
-        table.width = None
-        table.expand = False
-        table.row_styles = ["dim", "none"]
-        header("row_styles=['dim', 'none']")
-
-        console.print(table, justify="center")
-
-        table.width = None
-        table.expand = False
-        table.row_styles = ["dim", "none"]
-        table.leading = 1
-        header("leading=1, row_styles=['dim', 'none']")
-        console.print(table, justify="center")
-
-        table.width = None
-        table.expand = False
-        table.row_styles = ["dim", "none"]
-        table.show_lines = True
-        table.leading = 0
-        header("show_lines=True, row_styles=['dim', 'none']")
-        console.print(table, justify="center")

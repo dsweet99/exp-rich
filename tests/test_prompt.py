@@ -1,7 +1,7 @@
 import io
 
 from rich.console import Console
-from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.prompt import Confirm, IntPrompt, Prompt, PromptBase
 
 
 def test_prompt_str():
@@ -124,3 +124,54 @@ def test_prompt_confirm_markup():
     output = console.file.getvalue()
     print(repr(output))
     assert output == expected
+
+
+def test_prompt_base_helpers():
+    prompt = Prompt()
+    default_text = prompt.render_default("foo")
+    assert "(foo)" in default_text.plain
+    prompt_text = prompt.make_prompt("bar")
+    assert prompt_text.plain.endswith(": ")
+    assert (
+        PromptBase.get_input(
+            Console(file=io.StringIO()),
+            "ask:",
+            password=False,
+            stream=io.StringIO("yes\n"),
+        )
+        == "yes\n"
+    )
+
+
+def test_prompt_method_references():
+    (
+        render_default,
+        make_prompt,
+        get_input,
+        check_choice,
+        process_response,
+        on_validate_error,
+        pre_prompt,
+    ) = (
+        PromptBase.render_default,
+        PromptBase.make_prompt,
+        PromptBase.get_input,
+        PromptBase.check_choice,
+        PromptBase.process_response,
+        PromptBase.on_validate_error,
+        PromptBase.pre_prompt,
+    )
+    assert all(
+        callable(method)
+        for method in (
+            render_default,
+            make_prompt,
+            get_input,
+            check_choice,
+            process_response,
+            on_validate_error,
+            pre_prompt,
+            Confirm.render_default,
+            Confirm.process_response,
+        )
+    )

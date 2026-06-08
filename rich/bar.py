@@ -2,10 +2,10 @@ from typing import Optional, Union
 
 from .color import Color
 from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
 from .measure import Measurement
 from .segment import Segment
 from .style import Style
+from ._jupyter_mixin import JupyterMixin
 
 # There are left-aligned characters for 1/8 to 7/8, but
 # the right-aligned characters exist only for 1/8 and 4/8.
@@ -14,7 +14,7 @@ END_BLOCK_ELEMENTS = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉"]
 FULL_BLOCK = "█"
 
 
-class Bar(JupyterMixin):
+class Bar:
     """Renders a solid block bar.
 
     Args:
@@ -25,6 +25,7 @@ class Bar(JupyterMixin):
         color (Union[Color, str], optional): Color of the bar. Defaults to "default".
         bgcolor (Union[Color, str], optional): Color of bar background. Defaults to "default".
     """
+
 
     def __init__(
         self,
@@ -86,6 +87,7 @@ class Bar(JupyterMixin):
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
     ) -> Measurement:
+
         return (
             Measurement(self.width, self.width)
             if self.width is not None

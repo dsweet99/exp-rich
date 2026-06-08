@@ -870,14 +870,13 @@ def test_print_newline_start() -> None:
 
 
 def test_is_terminal_broken_file() -> None:
-    console = Console()
+    class BrokenIO(io.StringIO):
+        def isatty(self) -> bool:
+            raise ValueError()
 
-    def _mock_isatty():
-        raise ValueError()
+    console = Console(file=BrokenIO())
 
-    console.file.isatty = _mock_isatty
-
-    assert console.is_terminal == False
+    assert console.is_terminal is False
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not relevant on Windows")

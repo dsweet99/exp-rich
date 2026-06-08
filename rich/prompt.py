@@ -362,39 +362,3 @@ class Confirm(PromptBase[bool]):
             raise InvalidResponse(self.validate_error_message)
         return value == self.choices[0]
 
-
-if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-
-    if Confirm.ask("Run [i]prompt[/i] tests?", default=True):
-        while True:
-            result = IntPrompt.ask(
-                ":rocket: Enter a number between [b]1[/b] and [b]10[/b]", default=5
-            )
-            if result >= 1 and result <= 10:
-                break
-            print(":pile_of_poo: [prompt.invalid]Number must be between 1 and 10")
-        print(f"number={result}")
-
-        while True:
-            password = Prompt.ask(
-                "Please enter a password [cyan](must be at least 5 characters)",
-                password=True,
-            )
-            if len(password) >= 5:
-                break
-            print("[prompt.invalid]password too short")
-        print(f"password={password!r}")
-
-        fruit = Prompt.ask("Enter a fruit", choices=["apple", "orange", "pear"])
-        print(f"fruit={fruit!r}")
-
-        doggie = Prompt.ask(
-            "What's the best Dog? (Case INSENSITIVE)",
-            choices=["Border Terrier", "Collie", "Labradoodle"],
-            case_sensitive=False,
-        )
-        print(f"doggie={doggie!r}")
-
-    else:
-        print("[b]OK :loudly_crying_face:")

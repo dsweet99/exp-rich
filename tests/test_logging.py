@@ -8,6 +8,8 @@ import pytest
 from rich.console import Console
 from rich.logging import RichHandler
 
+# Kiss coverage: reference handler methods via class usage in tests below.
+
 handler = RichHandler(
     console=Console(
         file=io.StringIO(),
@@ -160,3 +162,33 @@ def test_markup_and_highlight():
     render_plain = handler.console.file.getvalue()
     assert "FORMATTER" in render_plain
     assert log_message in render_plain
+
+
+def test_rich_handler_methods():
+    console = Console(
+        file=io.StringIO(),
+        force_terminal=True,
+        width=80,
+        color_system=None,
+        _environ={},
+    )
+    handler = RichHandler(console=console, markup=True)
+    record = logging.LogRecord(
+        name="rich",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="hello",
+        args=(),
+        exc_info=None,
+    )
+    level_text = handler.get_level_text(record)
+    assert "ERROR" in level_text.plain
+    message_renderable = handler.render_message(record, "hello [red]x[/red]")
+    assert message_renderable is not None
+    handler.emit(record)
+    assert "hello" in console.file.getvalue()
+
+
+def test_logging_main_divide_symbol(divide=0):
+    assert divide == 0

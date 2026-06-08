@@ -10,14 +10,13 @@ from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional, Type, Unio
 if TYPE_CHECKING:
     from ._log_render import FormatTimeCallable
     from .console import Console, ConsoleRenderable
-    from .highlighter import Highlighter
+    from .highlighter import Highlighter, ReprHighlighter
     from .traceback import Traceback
 
 from rich._null_file import NullFile
 
 from . import get_console
 from ._log_render import LogRender
-from .highlighter import ReprHighlighter
 from .text import Text
 
 
@@ -66,8 +65,6 @@ class RichHandler(Handler):
         "TRACE",
         "PATCH",
     ]
-    HIGHLIGHTER_CLASS: ClassVar[Type[Highlighter]] = ReprHighlighter
-
     def __init__(
         self,
         level: Union[int, str] = logging.NOTSET,
@@ -96,7 +93,11 @@ class RichHandler(Handler):
     ) -> None:
         super().__init__(level=level)
         self.console = console or get_console()
-        self.highlighter = highlighter or self.HIGHLIGHTER_CLASS()
+        if highlighter is None:
+            from .highlighter import ReprHighlighter
+
+            highlighter = ReprHighlighter()
+        self.highlighter = highlighter
         self._log_render = LogRender(
             show_time=show_time,
             show_level=show_level,
@@ -135,6 +136,44 @@ class RichHandler(Handler):
         )
         return level_text
 
+    def _build_traceback(self, record: LogRecord):
+        exc_type, exc_value, exc_traceback = record.exc_info
+        assert exc_type is not None
+        assert exc_value is not None
+        from .traceback import Traceback
+
+        return Traceback.from_exception(
+            exc_type,
+            exc_value,
+            exc_traceback,
+            width=self.tracebacks_width,
+            code_width=self.tracebacks_code_width,
+            extra_lines=self.tracebacks_extra_lines,
+            theme=self.tracebacks_theme,
+            word_wrap=self.tracebacks_word_wrap,
+            show_locals=self.tracebacks_show_locals,
+            locals_max_length=self.locals_max_length,
+            locals_max_string=self.locals_max_string,
+            suppress=self.tracebacks_suppress,
+            max_frames=self.tracebacks_max_frames,
+        )
+
+    def _format_record_message(self, record: LogRecord) -> str:
+        record.message = record.getMessage()
+        formatter = self.formatter
+        if hasattr(formatter, "usesTime") and formatter.usesTime():
+            record.asctime = formatter.formatTime(record, formatter.datefmt)
+        return formatter.formatMessage(record)
+
+    def _write_log_output(self, log_renderable: ConsoleRenderable, record: LogRecord) -> None:
+        if isinstance(self.console.file, NullFile):
+            self.handleError(record)
+            return
+        try:
+            self.console.print(log_renderable)
+        except Exception:
+            self.handleError(record)
+
     def emit(self, record: LogRecord) -> None:
         """Invoked by logging."""
         message = self.format(record)
@@ -144,48 +183,16 @@ class RichHandler(Handler):
             and record.exc_info
             and record.exc_info != (None, None, None)
         ):
-            exc_type, exc_value, exc_traceback = record.exc_info
-            assert exc_type is not None
-            assert exc_value is not None
-            from .traceback import Traceback
-
-            traceback = Traceback.from_exception(
-                exc_type,
-                exc_value,
-                exc_traceback,
-                width=self.tracebacks_width,
-                code_width=self.tracebacks_code_width,
-                extra_lines=self.tracebacks_extra_lines,
-                theme=self.tracebacks_theme,
-                word_wrap=self.tracebacks_word_wrap,
-                show_locals=self.tracebacks_show_locals,
-                locals_max_length=self.locals_max_length,
-                locals_max_string=self.locals_max_string,
-                suppress=self.tracebacks_suppress,
-                max_frames=self.tracebacks_max_frames,
-            )
+            traceback = self._build_traceback(record)
             message = record.getMessage()
             if self.formatter:
-                record.message = record.getMessage()
-                formatter = self.formatter
-                if hasattr(formatter, "usesTime") and formatter.usesTime():
-                    record.asctime = formatter.formatTime(record, formatter.datefmt)
-                message = formatter.formatMessage(record)
+                message = self._format_record_message(record)
 
         message_renderable = self.render_message(record, message)
         log_renderable = self.render(
             record=record, traceback=traceback, message_renderable=message_renderable
         )
-        if isinstance(self.console.file, NullFile):
-            # Handles pythonw, where stdout/stderr are null, and we return NullFile
-            # instance from Console.file. In this case, we still want to make a log record
-            # even though we won't be writing anything to a file.
-            self.handleError(record)
-        else:
-            try:
-                self.console.print(log_renderable)
-            except Exception:
-                self.handleError(record)
+        self._write_log_output(log_renderable, record)
 
     def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
         """Render message text in to Text.
@@ -246,60 +253,3 @@ class RichHandler(Handler):
         )
         return log_renderable
 
-
-if __name__ == "__main__":  # pragma: no cover
-    from time import sleep
-
-    FORMAT = "%(message)s"
-    # FORMAT = "%(asctime)-15s - %(levelname)s - %(message)s"
-    logging.basicConfig(
-        level="NOTSET",
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, tracebacks_show_locals=True)],
-    )
-    log = logging.getLogger("rich")
-
-    log.info("Server starting...")
-    log.info("Listening on http://127.0.0.1:8080")
-    sleep(1)
-
-    log.info("GET /index.html 200 1298")
-    log.info("GET /imgs/backgrounds/back1.jpg 200 54386")
-    log.info("GET /css/styles.css 200 54386")
-    log.warning("GET /favicon.ico 404 242")
-    sleep(1)
-
-    log.debug(
-        "JSONRPC request\n--> %r\n<-- %r",
-        {
-            "version": "1.1",
-            "method": "confirmFruitPurchase",
-            "params": [["apple", "orange", "mangoes", "pomelo"], 1.123],
-            "id": "194521489",
-        },
-        {"version": "1.1", "result": True, "error": None, "id": "194521489"},
-    )
-    log.debug(
-        "Loading configuration file /adasd/asdasd/qeqwe/qwrqwrqwr/sdgsdgsdg/werwerwer/dfgerert/ertertert/ertetert/werwerwer"
-    )
-    log.error("Unable to find 'pomelo' in database!")
-    log.info("POST /jsonrpc/ 200 65532")
-    log.info("POST /admin/ 401 42234")
-    log.warning("password was rejected for admin site.")
-
-    def divide() -> None:
-        number = 1
-        divisor = 0
-        foos = ["foo"] * 100
-        log.debug("in divide")
-        try:
-            number / divisor
-        except:
-            log.exception("An error of some kind occurred!")
-
-    divide()
-    sleep(1)
-    log.critical("Out of memory!")
-    log.info("Server exited with code=-1")
-    log.info("[bold]EXITING...[/bold]", extra=dict(markup=True))
