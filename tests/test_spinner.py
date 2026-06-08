@@ -1,6 +1,6 @@
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.measure import Measurement
 from rich.rule import Rule
 from rich.spinner import Spinner

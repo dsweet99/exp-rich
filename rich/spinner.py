@@ -1,13 +1,11 @@
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from typing import List, Optional, Union, cast
+
+import importlib as _importlib
 
 from ._spinners import SPINNERS
 from .measure import Measurement
-from .table import Table
 from .text import Text
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType, RenderResult
-    from .style import StyleType
+from ._render_protocol import Console, ConsoleOptions, RenderResult, RenderableType, StyleType
 
 
 class Spinner:
@@ -88,6 +86,7 @@ class Spinner:
         elif isinstance(self.text, (str, Text)):
             return Text.assemble(frame, " ", self.text)
         else:
+            Table = _importlib.import_module(".table", __package__).Table
             table = Table.grid(padding=1)
             table.add_row(frame, self.text)
             return table
@@ -112,21 +111,3 @@ class Spinner:
             self.style = style
         if speed:
             self._update_speed = speed
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from time import sleep
-
-    from .console import Group
-    from .live import Live
-
-    all_spinners = Group(
-        *[
-            Spinner(spinner_name, text=Text(repr(spinner_name), style="green"))
-            for spinner_name in sorted(SPINNERS.keys())
-        ]
-    )
-
-    with Live(all_spinners, refresh_per_second=20) as live:
-        while True:
-            sleep(0.1)

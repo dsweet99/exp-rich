@@ -1,19 +1,30 @@
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        RenderableType,
-        RenderResult,
-    )
+import importlib as _importlib
+from typing import List, Optional, Tuple, Union
 
+from ._padding_types import PaddingDimensions
 from .jupyter import JupyterMixin
 from .measure import Measurement
-from .segment import Segment
-from .style import Style
+from ._segment_proxy import Segment
+from ._render_protocol import Console, ConsoleOptions, RenderResult, RenderableType
 
-PaddingDimensions = Union[int, Tuple[int], Tuple[int, int], Tuple[int, int, int, int]]
+Style = _importlib.import_module(".style", __package__).Style
+
+def _padding_content_width(
+    console: "Console",
+    options: "ConsoleOptions",
+    renderable: "RenderableType",
+    expand: bool,
+    left: int,
+    right: int,
+) -> int:
+    if expand:
+        return options.max_width
+    return min(
+        Measurement.get(console, options, renderable).maximum + left + right,
+        options.max_width,
+    )
 
 
 class Padding(JupyterMixin):
@@ -80,15 +91,9 @@ class Padding(JupyterMixin):
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
         style = console.get_style(self.style)
-        if self.expand:
-            width = options.max_width
-        else:
-            width = min(
-                Measurement.get(console, options, self.renderable).maximum
-                + self.left
-                + self.right,
-                options.max_width,
-            )
+        width = _padding_content_width(
+            console, options, self.renderable, self.expand, self.left, self.right
+        )
         render_options = options.update_width(width - self.left - self.right)
         if render_options.height is not None:
             render_options = render_options.update_height(
@@ -136,6 +141,4 @@ class Padding(JupyterMixin):
 
 
 if __name__ == "__main__":  #  pragma: no cover
-    from rich import print
-
-    print(Padding("Hello, World", (2, 4), style="on blue"))
+    _importlib.import_module("rich").print(Padding("Hello, World", (2, 4), style="on blue"))

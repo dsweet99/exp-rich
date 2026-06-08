@@ -2,8 +2,10 @@
 Demonstrates how to export a SVG
 """
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.table import Table
+import os
+import webbrowser
 
 table = Table(title="Star Wars Movies")
 
@@ -19,8 +21,5 @@ table.add_row("Dec 16, 2016", "Rogue One: A Star Wars Story", "$1,332,439,889")
 console = Console(record=True)
 console.print(table, justify="center")
 console.save_svg("table.svg", title="save_table_svg.py")
-
-import os
-import webbrowser
 
 webbrowser.open(f"file://{os.path.abspath('table.svg')}")

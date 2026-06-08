@@ -6,15 +6,15 @@ from textwrap import dedent
 import pytest
 
 from rich import box, errors
-from rich.console import Console
+from rich._console_entry import Console
 from rich.measure import Measurement
 from rich.style import Style
 from rich.table import Column, Table
 from rich.text import Text
 
 
-def render_tables():
-    console = Console(
+def _make_render_console() -> Console:
+    return Console(
         width=60,
         force_terminal=True,
         file=io.StringIO(),
@@ -23,66 +23,76 @@ def render_tables():
         _environ={},
     )
 
+
+def _make_sample_table() -> Table:
     table = Table(title="test table", caption="table caption", expand=False)
     table.add_column("foo", footer=Text("total"), no_wrap=True, overflow="ellipsis")
     table.add_column("bar", justify="center")
     table.add_column("baz", justify="right")
-
     table.add_row("Averlongwordgoeshere", "banana pancakes", None)
+    return table
 
+
+def _render_measurement_variants(console: Console, table: Table) -> None:
     assert Measurement.get(console, console.options, table) == Measurement(41, 48)
     table.expand = True
     assert Measurement.get(console, console.options, table) == Measurement(41, 48)
 
+
+def _render_width_and_justify(console: Console, table: Table) -> None:
     for width in range(10, 60, 5):
         console.print(table, width=width)
-
     table.expand = False
     console.print(table, justify="left")
     console.print(table, justify="center")
     console.print(table, justify="right")
 
-    assert table.row_count == 1
 
+def _render_row_variants(console: Console, table: Table) -> None:
+    assert table.row_count == 1
     table.row_styles = ["red", "yellow"]
     table.add_row("Coffee")
     table.add_row("Coffee", "Chocolate", None, "cinnamon")
-
     assert table.row_count == 3
-
     console.print(table)
 
+
+def _render_display_options(console: Console, table: Table) -> None:
     table.show_lines = True
     console.print(table)
-
     table.show_footer = True
     console.print(table)
-
     table.show_edge = False
-
     console.print(table)
-
     table.padding = 1
     console.print(table)
 
+
+def _render_size_options(console: Console, table: Table) -> None:
     table.width = 20
     assert Measurement.get(console, console.options, table) == Measurement(20, 20)
     table.expand = False
     assert Measurement.get(console, console.options, table) == Measurement(20, 20)
     table.expand = True
     console.print(table)
-
     table.columns[0].no_wrap = True
     table.columns[1].no_wrap = True
     table.columns[2].no_wrap = True
-
     console.print(table)
-
     table.padding = 0
     table.width = 60
     table.leading = 1
     console.print(table)
 
+
+def render_tables():
+    console = _make_render_console()
+    table = _make_sample_table()
+    _render_measurement_variants(console, table)
+    _render_width_and_justify(console, table)
+    _render_row_variants(console, table)
+    _render_display_options(console, table)
+    _render_size_options(console, table)
     return console.file.getvalue()
 
 

@@ -185,3 +185,13 @@ def test_blend_rgb() -> None:
     assert blend_rgb(
         ColorTriplet(10, 20, 30), ColorTriplet(30, 40, 50)
     ) == ColorTriplet(20, 30, 40)
+
+
+def test_color_is_system_defined() -> None:
+    assert Color.parse("red").is_system_defined is True
+    assert Color.parse("#ff0000").is_system_defined is False
+
+
+def test_color_is_default() -> None:
+    assert Color("default", ColorType.DEFAULT).is_default is True
+    assert Color.parse("red").is_default is False

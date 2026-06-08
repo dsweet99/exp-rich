@@ -2,7 +2,7 @@
 This example demonstrates the justify argument to print.
 """
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.panel import Panel
 
 console = Console(width=20)

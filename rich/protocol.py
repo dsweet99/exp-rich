@@ -1,7 +1,4 @@
-from typing import Any, cast, Set, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from rich.console import RenderableType
+from typing import Any, cast, Set
 
 _GIBBERISH = """aihwerij235234ljsdnp34ksodfipwoe234234jlskjdf"""
 
@@ -15,7 +12,7 @@ def is_renderable(check_object: Any) -> bool:
     )
 
 
-def rich_cast(renderable: object) -> "RenderableType":
+def rich_cast(renderable: object) -> Any:
     """Cast an object to a renderable by calling __rich__ if present.
 
     Args:
@@ -24,8 +21,6 @@ def rich_cast(renderable: object) -> "RenderableType":
     Returns:
         object: The result of recursively calling __rich__.
     """
-    from rich.console import RenderableType
-
     rich_visited_set: Set[type] = set()  # Prevent potential infinite loop
     while hasattr(renderable, "__rich__") and not isinstance(renderable, type):
         # Detect object which claim to have all the attributes
@@ -38,4 +33,4 @@ def rich_cast(renderable: object) -> "RenderableType":
             break
         rich_visited_set.add(renderable_type)
 
-    return cast(RenderableType, renderable)
+    return cast(Any, renderable)

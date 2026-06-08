@@ -1,7 +1,8 @@
+import importlib as _importlib
 from time import sleep
 from urllib.request import urlopen
 
-from rich.progress import wrap_file
+wrap_file = _importlib.import_module("rich.progress").wrap_file
 
 # Read a URL with urlopen
 response = urlopen("https://www.textualize.io")

@@ -1,4 +1,4 @@
-from rich.console import Console
+from rich._console_entry import Console
 from rich.containers import Lines, Renderables
 from rich.text import Span, Text
 from rich.style import Style
@@ -33,6 +33,12 @@ def test_lines_rich_console():
 
     result = list(lines.__rich_console__(console, console.options))
     assert result == [Text("foo")]
+
+
+def test_lines_extend():
+    lines = Lines([Text("a")])
+    lines.extend([Text("b"), Text("c")])
+    assert len(lines) == 3
 
 
 def test_lines_justify():

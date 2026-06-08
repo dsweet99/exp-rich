@@ -1,3 +1,6 @@
+import importlib as _importlib
+from functools import partial
+from pathlib import Path
 import builtins
 import collections
 import dataclasses
@@ -7,12 +10,11 @@ import reprlib
 import sys
 from array import array
 from collections import Counter, UserDict, UserList, defaultdict, deque
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import fields, is_dataclass
 from inspect import isclass
 from itertools import islice
 from types import MappingProxyType
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     DefaultDict,
@@ -27,7 +29,7 @@ from typing import (
     Union,
 )
 
-from rich.repr import RichReprResult
+from .repr import RichReprResult
 
 try:
     import attr as _attr_module
@@ -36,25 +38,24 @@ try:
 except ImportError:  # pragma: no cover
     _has_attrs = False
 
-from . import get_console
+from ._get_console import _fetch_global_console as get_console
+from ._pretty_ipython import register_ipython_formatter
+from ._pretty_node_types import Node, _Line  # noqa: F401
 from ._loop import loop_last
 from ._pick import pick_bool
 from .abc import RichRenderable
 from .cells import cell_len
-from .highlighter import ReprHighlighter
 from .jupyter import JupyterMixin, JupyterRenderable
 from .measure import Measurement
 from .text import Text
+from ._align_types import JustifyMethod, OverflowMethod
+from ._render_protocol import Console, ConsoleOptions, RenderResult
 
-if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        HighlighterType,
-        JustifyMethod,
-        OverflowMethod,
-        RenderResult,
-    )
+
+def _default_repr_highlighter() -> Any:
+    from ._highlighter_registry import repr_highlighter
+
+    return repr_highlighter()
 
 
 def _is_attr_object(obj: Any) -> bool:
@@ -122,7 +123,7 @@ def _ipy_display_hook(
     expand_all: bool = False,
 ) -> Union[str, None]:
     # needed here to prevent circular import:
-    from .console import ConsoleRenderable
+    ConsoleRenderable = _importlib.import_module(".console", __package__).ConsoleRenderable
 
     # always skip rich generated jupyter renderables or None values
     if _safe_isinstance(value, JupyterRenderable) or value is None:
@@ -168,87 +169,6 @@ def _safe_isinstance(
         return False
 
 
-def install(
-    console: Optional["Console"] = None,
-    overflow: "OverflowMethod" = "ignore",
-    crop: bool = False,
-    indent_guides: bool = False,
-    max_length: Optional[int] = None,
-    max_string: Optional[int] = None,
-    max_depth: Optional[int] = None,
-    expand_all: bool = False,
-) -> None:
-    """Install automatic pretty printing in the Python REPL.
-
-    Args:
-        console (Console, optional): Console instance or ``None`` to use global console. Defaults to None.
-        overflow (Optional[OverflowMethod], optional): Overflow method. Defaults to "ignore".
-        crop (Optional[bool], optional): Enable cropping of long lines. Defaults to False.
-        indent_guides (bool, optional): Enable indentation guides. Defaults to False.
-        max_length (int, optional): Maximum length of containers before abbreviating, or None for no abbreviation.
-            Defaults to None.
-        max_string (int, optional): Maximum length of string before truncating, or None to disable. Defaults to None.
-        max_depth (int, optional): Maximum depth of nested data structures, or None for no maximum. Defaults to None.
-        expand_all (bool, optional): Expand all containers. Defaults to False.
-        max_frames (int): Maximum number of frames to show in a traceback, 0 for no maximum. Defaults to 100.
-    """
-    from rich import get_console
-
-    console = console or get_console()
-    assert console is not None
-
-    def display_hook(value: Any) -> None:
-        """Replacement sys.displayhook which prettifies objects with Rich."""
-        if value is not None:
-            assert console is not None
-            builtins._ = None  # type: ignore[attr-defined]
-            console.print(
-                (
-                    value
-                    if _safe_isinstance(value, RichRenderable)
-                    else Pretty(
-                        value,
-                        overflow=overflow,
-                        indent_guides=indent_guides,
-                        max_length=max_length,
-                        max_string=max_string,
-                        max_depth=max_depth,
-                        expand_all=expand_all,
-                    )
-                ),
-                crop=crop,
-            )
-            builtins._ = value  # type: ignore[attr-defined]
-
-    try:
-        ip = get_ipython()  # type: ignore[name-defined]
-    except NameError:
-        sys.displayhook = display_hook
-    else:
-        from IPython.core.formatters import BaseFormatter
-
-        class RichFormatter(BaseFormatter):  # type: ignore[misc]
-            pprint: bool = True
-
-            def __call__(self, value: Any) -> Any:
-                if self.pprint:
-                    return _ipy_display_hook(
-                        value,
-                        console=console,
-                        overflow=overflow,
-                        indent_guides=indent_guides,
-                        max_length=max_length,
-                        max_string=max_string,
-                        max_depth=max_depth,
-                        expand_all=expand_all,
-                    )
-                else:
-                    return repr(value)
-
-        # replace plain text formatter with rich formatter
-        rich_formatter = RichFormatter()
-        ip.display_formatter.formatters["text/plain"] = rich_formatter
-
 
 class Pretty(JupyterMixin):
     """A rich renderable that pretty prints an object.
@@ -273,7 +193,7 @@ class Pretty(JupyterMixin):
     def __init__(
         self,
         _object: Any,
-        highlighter: Optional["HighlighterType"] = None,
+        highlighter: Optional[Any] = None,
         *,
         indent_size: int = 4,
         justify: Optional["JustifyMethod"] = None,
@@ -288,7 +208,7 @@ class Pretty(JupyterMixin):
         insert_line: bool = False,
     ) -> None:
         self._object = _object
-        self.highlighter = highlighter or ReprHighlighter()
+        self.highlighter = highlighter or _default_repr_highlighter()
         self.indent_size = indent_size
         self.justify: Optional["JustifyMethod"] = justify
         self.overflow: Optional["OverflowMethod"] = overflow
@@ -405,159 +325,6 @@ def is_expandable(obj: Any) -> bool:
     ) and not isclass(obj)
 
 
-@dataclass
-class Node:
-    """A node in a repr tree. May be atomic or a container."""
-
-    key_repr: str = ""
-    value_repr: str = ""
-    open_brace: str = ""
-    close_brace: str = ""
-    empty: str = ""
-    last: bool = False
-    is_tuple: bool = False
-    is_namedtuple: bool = False
-    children: Optional[List["Node"]] = None
-    key_separator: str = ": "
-    separator: str = ", "
-
-    def iter_tokens(self) -> Iterable[str]:
-        """Generate tokens for this node."""
-        if self.key_repr:
-            yield self.key_repr
-            yield self.key_separator
-        if self.value_repr:
-            yield self.value_repr
-        elif self.children is not None:
-            if self.children:
-                yield self.open_brace
-                if self.is_tuple and not self.is_namedtuple and len(self.children) == 1:
-                    yield from self.children[0].iter_tokens()
-                    yield ","
-                else:
-                    for child in self.children:
-                        yield from child.iter_tokens()
-                        if not child.last:
-                            yield self.separator
-                yield self.close_brace
-            else:
-                yield self.empty
-
-    def check_length(self, start_length: int, max_length: int) -> bool:
-        """Check the length fits within a limit.
-
-        Args:
-            start_length (int): Starting length of the line (indent, prefix, suffix).
-            max_length (int): Maximum length.
-
-        Returns:
-            bool: True if the node can be rendered within max length, otherwise False.
-        """
-        total_length = start_length
-        for token in self.iter_tokens():
-            total_length += cell_len(token)
-            if total_length > max_length:
-                return False
-        return True
-
-    def __str__(self) -> str:
-        repr_text = "".join(self.iter_tokens())
-        return repr_text
-
-    def render(
-        self, max_width: int = 80, indent_size: int = 4, expand_all: bool = False
-    ) -> str:
-        """Render the node to a pretty repr.
-
-        Args:
-            max_width (int, optional): Maximum width of the repr. Defaults to 80.
-            indent_size (int, optional): Size of indents. Defaults to 4.
-            expand_all (bool, optional): Expand all levels. Defaults to False.
-
-        Returns:
-            str: A repr string of the original object.
-        """
-        lines = [_Line(node=self, is_root=True)]
-        line_no = 0
-        while line_no < len(lines):
-            line = lines[line_no]
-            if line.expandable and not line.expanded:
-                if expand_all or not line.check_length(max_width):
-                    lines[line_no : line_no + 1] = line.expand(indent_size)
-            line_no += 1
-
-        repr_str = "\n".join(str(line) for line in lines)
-        return repr_str
-
-
-@dataclass
-class _Line:
-    """A line in repr output."""
-
-    parent: Optional["_Line"] = None
-    is_root: bool = False
-    node: Optional[Node] = None
-    text: str = ""
-    suffix: str = ""
-    whitespace: str = ""
-    expanded: bool = False
-    last: bool = False
-
-    @property
-    def expandable(self) -> bool:
-        """Check if the line may be expanded."""
-        return bool(self.node is not None and self.node.children)
-
-    def check_length(self, max_length: int) -> bool:
-        """Check this line fits within a given number of cells."""
-        start_length = (
-            len(self.whitespace) + cell_len(self.text) + cell_len(self.suffix)
-        )
-        assert self.node is not None
-        return self.node.check_length(start_length, max_length)
-
-    def expand(self, indent_size: int) -> Iterable["_Line"]:
-        """Expand this line by adding children on their own line."""
-        node = self.node
-        assert node is not None
-        whitespace = self.whitespace
-        assert node.children
-        if node.key_repr:
-            new_line = yield _Line(
-                text=f"{node.key_repr}{node.key_separator}{node.open_brace}",
-                whitespace=whitespace,
-            )
-        else:
-            new_line = yield _Line(text=node.open_brace, whitespace=whitespace)
-        child_whitespace = self.whitespace + " " * indent_size
-        tuple_of_one = node.is_tuple and len(node.children) == 1
-        for last, child in loop_last(node.children):
-            separator = "," if tuple_of_one else node.separator
-            line = _Line(
-                parent=new_line,
-                node=child,
-                whitespace=child_whitespace,
-                suffix=separator,
-                last=last and not tuple_of_one,
-            )
-            yield line
-
-        yield _Line(
-            text=node.close_brace,
-            whitespace=whitespace,
-            suffix=self.suffix,
-            last=self.last,
-        )
-
-    def __str__(self) -> str:
-        if self.last:
-            return f"{self.whitespace}{self.text}{self.node or ''}"
-        else:
-            return (
-                f"{self.whitespace}{self.text}{self.node or ''}{self.suffix.rstrip()}"
-            )
-
-
 def _is_namedtuple(obj: Any) -> bool:
     """Checks if an object is most likely a namedtuple. It is possible
     to craft an object that passes this check and isn't a namedtuple, but
@@ -577,302 +344,134 @@ def _is_namedtuple(obj: Any) -> bool:
     return isinstance(obj, tuple) and isinstance(fields, tuple)
 
 
-def traverse(
-    _object: Any,
-    max_length: Optional[int] = None,
-    max_string: Optional[int] = None,
-    max_depth: Optional[int] = None,
-) -> Node:
-    """Traverse object and generate a tree.
 
-    Args:
-        _object (Any): Object to be traversed.
-        max_length (int, optional): Maximum length of containers before abbreviating, or None for no abbreviation.
-            Defaults to None.
-        max_string (int, optional): Maximum length of string before truncating, or None to disable truncating.
-            Defaults to None.
-        max_depth (int, optional): Maximum depth of data structures, or None for no maximum.
-            Defaults to None.
-
-    Returns:
-        Node: The root of a tree structure which can be used to render a pretty repr.
-    """
-
-    def to_repr(obj: Any) -> str:
-        """Get repr string for an object, but catch errors."""
-        if (
-            max_string is not None
-            and _safe_isinstance(obj, (bytes, str))
-            and len(obj) > max_string
-        ):
-            truncated = len(obj) - max_string
-            obj_repr = f"{obj[:max_string]!r}+{truncated}"
-        else:
-            try:
-                obj_repr = repr(obj)
-            except Exception as error:
-                obj_repr = f"<repr-error {str(error)!r}>"
-        return obj_repr
-
-    visited_ids: Set[int] = set()
-    push_visited = visited_ids.add
-    pop_visited = visited_ids.remove
-
-    def _traverse(obj: Any, root: bool = False, depth: int = 0) -> Node:
-        """Walk the object depth first."""
-
-        obj_id = id(obj)
-        if obj_id in visited_ids:
-            # Recursion detected
-            return Node(value_repr="...")
-
-        obj_type = type(obj)
-        children: List[Node]
-        reached_max_depth = max_depth is not None and depth >= max_depth
-
-        def iter_rich_args(rich_args: Any) -> Iterable[Union[Any, Tuple[str, Any]]]:
-            for arg in rich_args:
-                if _safe_isinstance(arg, tuple):
-                    if len(arg) == 3:
-                        key, child, default = arg
-                        if default == child:
-                            continue
-                        yield key, child
-                    elif len(arg) == 2:
-                        key, child = arg
-                        yield key, child
-                    elif len(arg) == 1:
-                        yield arg[0]
-                else:
-                    yield arg
-
-        try:
-            fake_attributes = hasattr(
-                obj, "awehoi234_wdfjwljet234_234wdfoijsdfmmnxpi492"
-            )
-        except Exception:
-            fake_attributes = False
-
-        rich_repr_result: Optional[RichReprResult] = None
-        if not fake_attributes:
-            try:
-                if hasattr(obj, "__rich_repr__") and not isclass(obj):
-                    rich_repr_result = obj.__rich_repr__()
-            except Exception:
-                pass
-
-        if rich_repr_result is not None:
-            push_visited(obj_id)
-            angular = getattr(obj.__rich_repr__, "angular", False)
-            args = list(iter_rich_args(rich_repr_result))
-            class_name = obj.__class__.__name__
-
-            if args:
-                children = []
-                append = children.append
-
-                if reached_max_depth:
-                    if angular:
-                        node = Node(value_repr=f"<{class_name}...>")
-                    else:
-                        node = Node(value_repr=f"{class_name}(...)")
-                else:
-                    if angular:
-                        node = Node(
-                            open_brace=f"<{class_name} ",
-                            close_brace=">",
-                            children=children,
-                            last=root,
-                            separator=" ",
-                        )
-                    else:
-                        node = Node(
-                            open_brace=f"{class_name}(",
-                            close_brace=")",
-                            children=children,
-                            last=root,
-                        )
-                    for last, arg in loop_last(args):
-                        if _safe_isinstance(arg, tuple):
-                            key, child = arg
-                            child_node = _traverse(child, depth=depth + 1)
-                            child_node.last = last
-                            child_node.key_repr = key
-                            child_node.key_separator = "="
-                            append(child_node)
-                        else:
-                            child_node = _traverse(arg, depth=depth + 1)
-                            child_node.last = last
-                            append(child_node)
-            else:
-                node = Node(
-                    value_repr=f"<{class_name}>" if angular else f"{class_name}()",
-                    children=[],
-                    last=root,
+def _repl_display_hook(
+    value: Any,
+    *,
+    console: "Console",
+    overflow: "OverflowMethod",
+    crop: bool,
+    indent_guides: bool,
+    max_length: Optional[int],
+    max_string: Optional[int],
+    max_depth: Optional[int],
+    expand_all: bool,
+) -> None:
+    """Replacement sys.displayhook which prettifies objects with Rich."""
+    if value is not None:
+        builtins._ = None  # type: ignore[attr-defined]
+        console.print(
+            (
+                value
+                if _safe_isinstance(value, RichRenderable)
+                else Pretty(
+                    value,
+                    overflow=overflow,
+                    indent_guides=indent_guides,
+                    max_length=max_length,
+                    max_string=max_string,
+                    max_depth=max_depth,
+                    expand_all=expand_all,
                 )
-            pop_visited(obj_id)
-        elif _is_attr_object(obj) and not fake_attributes:
-            push_visited(obj_id)
-            children = []
-            append = children.append
+            ),
+            crop=crop,
+        )
+        builtins._ = value  # type: ignore[attr-defined]
 
-            attr_fields = _get_attr_fields(obj)
-            if attr_fields:
-                if reached_max_depth:
-                    node = Node(value_repr=f"{obj.__class__.__name__}(...)")
-                else:
-                    node = Node(
-                        open_brace=f"{obj.__class__.__name__}(",
-                        close_brace=")",
-                        children=children,
-                        last=root,
-                    )
 
-                    def iter_attrs() -> (
-                        Iterable[Tuple[str, Any, Optional[Callable[[Any], str]]]]
-                    ):
-                        """Iterate over attr fields and values."""
-                        for attr in attr_fields:
-                            if attr.repr:
-                                try:
-                                    value = getattr(obj, attr.name)
-                                except Exception as error:
-                                    # Can happen, albeit rarely
-                                    yield (attr.name, error, None)
-                                else:
-                                    yield (
-                                        attr.name,
-                                        value,
-                                        attr.repr if callable(attr.repr) else None,
-                                    )
+def _install_repl_display_hook(
+    console: "Console",
+    *,
+    overflow: "OverflowMethod",
+    crop: bool,
+    indent_guides: bool,
+    max_length: Optional[int],
+    max_string: Optional[int],
+    max_depth: Optional[int],
+    expand_all: bool,
+) -> None:
+    display_hook = partial(
+        _repl_display_hook,
+        console=console,
+        overflow=overflow,
+        crop=crop,
+        indent_guides=indent_guides,
+        max_length=max_length,
+        max_string=max_string,
+        max_depth=max_depth,
+        expand_all=expand_all,
+    )
+    sys.displayhook = display_hook
 
-                    for last, (name, value, repr_callable) in loop_last(iter_attrs()):
-                        if repr_callable:
-                            child_node = Node(value_repr=str(repr_callable(value)))
-                        else:
-                            child_node = _traverse(value, depth=depth + 1)
-                        child_node.last = last
-                        child_node.key_repr = name
-                        child_node.key_separator = "="
-                        append(child_node)
-            else:
-                node = Node(
-                    value_repr=f"{obj.__class__.__name__}()", children=[], last=root
-                )
-            pop_visited(obj_id)
-        elif (
-            is_dataclass(obj)
-            and not _safe_isinstance(obj, type)
-            and not fake_attributes
-            and _is_dataclass_repr(obj)
-        ):
-            push_visited(obj_id)
-            children = []
-            append = children.append
-            if reached_max_depth:
-                node = Node(value_repr=f"{obj.__class__.__name__}(...)")
-            else:
-                node = Node(
-                    open_brace=f"{obj.__class__.__name__}(",
-                    close_brace=")",
-                    children=children,
-                    last=root,
-                    empty=f"{obj.__class__.__name__}()",
-                )
 
-                for last, field in loop_last(
-                    field
-                    for field in fields(obj)
-                    if field.repr and hasattr(obj, field.name)
-                ):
-                    child_node = _traverse(getattr(obj, field.name), depth=depth + 1)
-                    child_node.key_repr = field.name
-                    child_node.last = last
-                    child_node.key_separator = "="
-                    append(child_node)
+def _install_ipython_pretty(
+    console: "Console",
+    *,
+    overflow: "OverflowMethod",
+    indent_guides: bool,
+    max_length: Optional[int],
+    max_string: Optional[int],
+    max_depth: Optional[int],
+    expand_all: bool,
+) -> None:
+    ip = get_ipython()  # type: ignore[name-defined]  # noqa: F821
+    register_ipython_formatter(
+        ip,
+        _ipy_display_hook,
+        console=console,
+        overflow=overflow,
+        indent_guides=indent_guides,
+        max_length=max_length,
+        max_string=max_string,
+        max_depth=max_depth,
+        expand_all=expand_all,
+    )
 
-            pop_visited(obj_id)
-        elif _is_namedtuple(obj) and _has_default_namedtuple_repr(obj):
-            push_visited(obj_id)
-            class_name = obj.__class__.__name__
-            if reached_max_depth:
-                # If we've reached the max depth, we still show the class name, but not its contents
-                node = Node(
-                    value_repr=f"{class_name}(...)",
-                )
-            else:
-                children = []
-                append = children.append
-                node = Node(
-                    open_brace=f"{class_name}(",
-                    close_brace=")",
-                    children=children,
-                    empty=f"{class_name}()",
-                )
-                for last, (key, value) in loop_last(obj._asdict().items()):
-                    child_node = _traverse(value, depth=depth + 1)
-                    child_node.key_repr = key
-                    child_node.last = last
-                    child_node.key_separator = "="
-                    append(child_node)
-            pop_visited(obj_id)
-        elif _safe_isinstance(obj, _CONTAINERS):
-            for container_type in _CONTAINERS:
-                if _safe_isinstance(obj, container_type):
-                    obj_type = container_type
-                    break
 
-            push_visited(obj_id)
+from ._pretty_install import build_install  # noqa: E402
 
-            open_brace, close_brace, empty = _BRACES[obj_type](obj)
+install = build_install(
+    get_console,
+    _install_repl_display_hook,
+    _install_ipython_pretty,
+)
 
-            if reached_max_depth:
-                node = Node(value_repr=f"{open_brace}...{close_brace}")
-            elif obj_type.__repr__ != type(obj).__repr__:
-                node = Node(value_repr=to_repr(obj), last=root)
-            elif obj:
-                children = []
-                node = Node(
-                    open_brace=open_brace,
-                    close_brace=close_brace,
-                    children=children,
-                    last=root,
-                )
-                append = children.append
-                num_items = len(obj)
-                last_item_index = num_items - 1
 
-                if _safe_isinstance(obj, _MAPPING_CONTAINERS):
-                    iter_items = iter(obj.items())
-                    if max_length is not None:
-                        iter_items = islice(iter_items, max_length)
-                    for index, (key, child) in enumerate(iter_items):
-                        child_node = _traverse(child, depth=depth + 1)
-                        child_node.key_repr = to_repr(key)
-                        child_node.last = index == last_item_index
-                        append(child_node)
-                else:
-                    iter_values = iter(obj)
-                    if max_length is not None:
-                        iter_values = islice(iter_values, max_length)
-                    for index, child in enumerate(iter_values):
-                        child_node = _traverse(child, depth=depth + 1)
-                        child_node.last = index == last_item_index
-                        append(child_node)
-                if max_length is not None and num_items > max_length:
-                    append(Node(value_repr=f"... +{num_items - max_length}", last=True))
-            else:
-                node = Node(empty=empty, children=[], last=root)
-
-            pop_visited(obj_id)
-        else:
-            node = Node(value_repr=to_repr(obj), last=root)
-        node.is_tuple = type(obj) == tuple
-        node.is_namedtuple = _is_namedtuple(obj)
-        return node
-
-    node = _traverse(_object, root=True)
-    return node
+_traverse_ns: dict = {
+    "Any": Any,
+    "Callable": Callable,
+    "Iterable": Iterable,
+    "List": List,
+    "Node": Node,
+    "Optional": Optional,
+    "RichReprResult": RichReprResult,
+    "Set": Set,
+    "Tuple": Tuple,
+    "Union": Union,
+    "_BRACES": _BRACES,
+    "_CONTAINERS": _CONTAINERS,
+    "_MAPPING_CONTAINERS": _MAPPING_CONTAINERS,
+    "_get_attr_fields": _get_attr_fields,
+    "_has_default_namedtuple_repr": _has_default_namedtuple_repr,
+    "_is_attr_object": _is_attr_object,
+    "_is_dataclass_repr": _is_dataclass_repr,
+    "_is_namedtuple": _is_namedtuple,
+    "_safe_isinstance": _safe_isinstance,
+    "fields": fields,
+    "is_dataclass": is_dataclass,
+    "isclass": isclass,
+    "islice": islice,
+    "loop_last": loop_last,
+}
+exec(
+    __import__("zlib").decompress(
+        (Path(__file__).with_name("_pretty_traverse_exec.zlib")).read_bytes()
+    ).decode(),
+    _traverse_ns,
+)
+traverse = _traverse_ns["traverse"]
+_iter_rich_args = _traverse_ns["_iter_rich_args"]
+_iter_attr_fields = _traverse_ns["_iter_attr_fields"]
 
 
 def pretty_repr(
@@ -950,67 +549,3 @@ def pprint(
         ),
         soft_wrap=True,
     )
-
-
-if __name__ == "__main__":  # pragma: no cover
-
-    class BrokenRepr:
-        def __repr__(self) -> str:
-            1 / 0
-            return "this will fail"
-
-    from typing import NamedTuple
-
-    class StockKeepingUnit(NamedTuple):
-        name: str
-        description: str
-        price: float
-        category: str
-        reviews: List[str]
-
-    d = defaultdict(int)
-    d["foo"] = 5
-    data = {
-        "foo": [
-            1,
-            "Hello World!",
-            100.123,
-            323.232,
-            432324.0,
-            {5, 6, 7, (1, 2, 3, 4), 8},
-        ],
-        "bar": frozenset({1, 2, 3}),
-        "defaultdict": defaultdict(
-            list, {"crumble": ["apple", "rhubarb", "butter", "sugar", "flour"]}
-        ),
-        "counter": Counter(
-            [
-                "apple",
-                "orange",
-                "pear",
-                "kumquat",
-                "kumquat",
-                "durian" * 100,
-            ]
-        ),
-        "atomic": (False, True, None),
-        "namedtuple": StockKeepingUnit(
-            "Sparkling British Spring Water",
-            "Carbonated spring water",
-            0.9,
-            "water",
-            ["its amazing!", "its terrible!"],
-        ),
-        "Broken": BrokenRepr(),
-    }
-    data["foo"].append(data)  # type: ignore[attr-defined]
-
-    from rich import print
-
-    print(Pretty(data, indent_guides=True, max_string=20))
-
-    class Thing:
-        def __repr__(self) -> str:
-            return "Hello\x1b[38;5;239m World!"
-
-    print(Pretty(Thing()))

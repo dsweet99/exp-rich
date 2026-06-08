@@ -1,6 +1,6 @@
 import pytest
 from rich.live_render import LiveRender
-from rich.console import Console, ConsoleDimensions, ConsoleOptions
+from rich._console_entry import Console, ConsoleDimensions, ConsoleOptions
 from rich.style import Style
 from rich.segment import Segment
 

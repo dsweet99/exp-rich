@@ -1,8 +1,6 @@
 import io
 import re
-
-from rich.console import Console, RenderableType
-
+from typing import Any
 
 re_link_ids = re.compile(r"id=[\d.\-]*?;.*?\x1b")
 
@@ -15,7 +13,9 @@ def replace_link_ids(render: str) -> str:
     return re_link_ids.sub("id=0;foo\x1b", render)
 
 
-def render(renderable: RenderableType, no_wrap: bool = False) -> str:
+def render(renderable: Any, no_wrap: bool = False) -> str:
+    from rich._console_entry import Console
+
     console = Console(
         width=100, file=io.StringIO(), color_system="truecolor", legacy_windows=False
     )

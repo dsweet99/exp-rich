@@ -1,11 +1,12 @@
 """
 A very minimal `cp` clone that displays a progress bar.
 """
+import importlib as _importlib
 import os
 import shutil
 import sys
 
-from rich.progress import Progress
+Progress = _importlib.import_module("rich.progress").Progress
 
 if __name__ == "__main__":
     if len(sys.argv) == 3:

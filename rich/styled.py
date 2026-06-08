@@ -1,11 +1,7 @@
-from typing import TYPE_CHECKING
-
 from .measure import Measurement
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import StyleType
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult, RenderableType
+from ._render_protocol import Console, ConsoleOptions, RenderResult, RenderableType
 
 
 class Styled:
@@ -34,9 +30,6 @@ class Styled:
         return Measurement.get(console, options, self.renderable)
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-    from rich.panel import Panel
+from ._styled_registry import register_styled  # noqa: E402
 
-    panel = Styled(Panel("hello"), "on blue")
-    print(panel)
+register_styled(Styled)

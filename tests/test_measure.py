@@ -2,7 +2,7 @@ from rich.text import Text
 import pytest
 
 from rich.errors import NotRenderableError
-from rich.console import Console
+from rich._console_entry import Console
 from rich.measure import Measurement, measure_renderables
 
 
@@ -13,7 +13,7 @@ def test_span():
 
 def test_no_renderable():
     console = Console()
-    text = Text()
+    Text()
 
     with pytest.raises(NotRenderableError):
         Measurement.get(console, console.options, None)

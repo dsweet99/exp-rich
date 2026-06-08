@@ -1,11 +1,7 @@
+from __future__ import annotations
+
 from operator import itemgetter
-from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, Sequence
-
-from . import errors
-from .protocol import is_renderable, rich_cast
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType
+from typing import Callable, NamedTuple, Optional, Sequence
 
 
 class Measurement(NamedTuple):
@@ -21,7 +17,7 @@ class Measurement(NamedTuple):
         """Get difference between maximum and minimum."""
         return self.maximum - self.minimum
 
-    def normalize(self) -> "Measurement":
+    def normalize(self) -> Measurement:
         """Get measurement that ensures that minimum <= maximum and minimum >= 0
 
         Returns:
@@ -31,7 +27,7 @@ class Measurement(NamedTuple):
         minimum = min(max(0, minimum), maximum)
         return Measurement(max(0, minimum), max(0, max(minimum, maximum)))
 
-    def with_maximum(self, width: int) -> "Measurement":
+    def with_maximum(self, width: int) -> Measurement:
         """Get a RenderableWith where the widths are <= width.
 
         Args:
@@ -43,7 +39,7 @@ class Measurement(NamedTuple):
         minimum, maximum = self
         return Measurement(min(minimum, width), min(maximum, width))
 
-    def with_minimum(self, width: int) -> "Measurement":
+    def with_minimum(self, width: int) -> Measurement:
         """Get a RenderableWith where the widths are >= width.
 
         Args:
@@ -58,7 +54,7 @@ class Measurement(NamedTuple):
 
     def clamp(
         self, min_width: Optional[int] = None, max_width: Optional[int] = None
-    ) -> "Measurement":
+    ) -> Measurement:
         """Clamp a measurement within the specified range.
 
         Args:
@@ -76,9 +72,7 @@ class Measurement(NamedTuple):
         return measurement
 
     @classmethod
-    def get(
-        cls, console: "Console", options: "ConsoleOptions", renderable: "RenderableType"
-    ) -> "Measurement":
+    def get(cls, console: object, options: object, renderable: object) -> Measurement:
         """Get a measurement for a renderable.
 
         Args:
@@ -95,15 +89,22 @@ class Measurement(NamedTuple):
         _max_width = options.max_width
         if _max_width < 1:
             return Measurement(0, 0)
+        from importlib import import_module
+
+        errors = import_module(".errors", package=__package__)
+        protocol = import_module(".protocol", package=__package__)
+        is_renderable = protocol.is_renderable
+        rich_cast = protocol.rich_cast
+
         if isinstance(renderable, str):
             renderable = console.render_str(
                 renderable, markup=options.markup, highlight=False
             )
         renderable = rich_cast(renderable)
         if is_renderable(renderable):
-            get_console_width: Optional[
-                Callable[["Console", "ConsoleOptions"], "Measurement"]
-            ] = getattr(renderable, "__rich_measure__", None)
+            get_console_width: Optional[Callable[[object, object], Measurement]] = (
+                getattr(renderable, "__rich_measure__", None)
+            )
             if get_console_width is not None:
                 render_width = (
                     get_console_width(console, options)
@@ -123,10 +124,10 @@ class Measurement(NamedTuple):
 
 
 def measure_renderables(
-    console: "Console",
-    options: "ConsoleOptions",
-    renderables: Sequence["RenderableType"],
-) -> "Measurement":
+    console: object,
+    options: object,
+    renderables: Sequence[object],
+) -> Measurement:
     """Get a measurement that would fit a number of renderables.
 
     Args:

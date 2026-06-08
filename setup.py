@@ -5,4 +5,7 @@
 import setuptools
 
 if __name__ == "__main__":
-    setuptools.setup(name="rich")
+    setuptools.setup(
+        name="rich",
+        packages=setuptools.find_packages(include=["rich", "rich.*"]),
+    )

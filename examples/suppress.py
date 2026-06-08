@@ -5,14 +5,15 @@ except ImportError:
     print("    pip install click")
     exit()
 
-from rich.traceback import install
+import importlib as _importlib
 
-install(suppress=[click])
+_importlib.import_module("rich.traceback").install(suppress=[click])
 
 
 @click.command()
+@click.argument("name")
 @click.option("--count", default=1, help="Number of greetings.")
-def hello(count):
+def hello(name, count):
     """Simple program that greets NAME for a total of COUNT times."""
     1 / 0
     for x in range(count):

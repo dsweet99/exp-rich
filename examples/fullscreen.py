@@ -3,16 +3,24 @@ Demonstrates a Rich "application" using the Layout and Live classes.
 
 """
 
+import importlib as _importlib
 from datetime import datetime
 
-from rich import box
-from rich.align import Align
-from rich.console import Console, Group
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
-from rich.syntax import Syntax
-from rich.table import Table
+_box = _importlib.import_module("rich.box")
+Align = _importlib.import_module("rich.align").Align
+_console_entry = _importlib.import_module("rich._console_entry")
+Console = _console_entry.Console
+Group = _console_entry.Group
+Layout = _importlib.import_module("rich.layout").Layout
+Panel = _importlib.import_module("rich.panel").Panel
+_progress = _importlib.import_module("rich.progress")
+BarColumn = _progress.BarColumn
+Progress = _progress.Progress
+SpinnerColumn = _progress.SpinnerColumn
+TextColumn = _progress.TextColumn
+Syntax = _importlib.import_module("rich.syntax").Syntax
+Table = _importlib.import_module("rich.table").Table
+box = _box
 
 console = Console()
 
@@ -127,50 +135,49 @@ def ratio_resolve(total: int, edges: List[Edge]) -> List[int]:
     return syntax
 
 
-job_progress = Progress(
-    "{task.description}",
-    SpinnerColumn(),
-    BarColumn(),
-    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-)
-job_progress.add_task("[green]Cooking")
-job_progress.add_task("[magenta]Baking", total=200)
-job_progress.add_task("[cyan]Mixing", total=400)
+if __name__ == "__main__":
+    job_progress = Progress(
+        "{task.description}",
+        SpinnerColumn(),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+    )
+    job_progress.add_task("[green]Cooking")
+    job_progress.add_task("[magenta]Baking", total=200)
+    job_progress.add_task("[cyan]Mixing", total=400)
 
-total = sum(task.total for task in job_progress.tasks)
-overall_progress = Progress()
-overall_task = overall_progress.add_task("All Jobs", total=int(total))
+    total = sum(task.total for task in job_progress.tasks)
+    overall_progress = Progress()
+    overall_task = overall_progress.add_task("All Jobs", total=int(total))
 
-progress_table = Table.grid(expand=True)
-progress_table.add_row(
-    Panel(
-        overall_progress,
-        title="Overall Progress",
-        border_style="green",
-        padding=(2, 2),
-    ),
-    Panel(job_progress, title="[b]Jobs", border_style="red", padding=(1, 2)),
-)
+    progress_table = Table.grid(expand=True)
+    progress_table.add_row(
+        Panel(
+            overall_progress,
+            title="Overall Progress",
+            border_style="green",
+            padding=(2, 2),
+        ),
+        Panel(job_progress, title="[b]Jobs", border_style="red", padding=(1, 2)),
+    )
 
+    layout = make_layout()
+    layout["header"].update(Header())
+    layout["body"].update(make_sponsor_message())
+    layout["box2"].update(Panel(make_syntax(), border_style="green"))
+    layout["box1"].update(Panel(layout.tree, border_style="red"))
+    layout["footer"].update(progress_table)
 
-layout = make_layout()
-layout["header"].update(Header())
-layout["body"].update(make_sponsor_message())
-layout["box2"].update(Panel(make_syntax(), border_style="green"))
-layout["box1"].update(Panel(layout.tree, border_style="red"))
-layout["footer"].update(progress_table)
+    from time import sleep
 
+    Live = _importlib.import_module("rich.live").Live
 
-from time import sleep
+    with Live(layout, refresh_per_second=10, screen=True):
+        while not overall_progress.finished:
+            sleep(0.1)
+            for job in job_progress.tasks:
+                if not job.finished:
+                    job_progress.advance(job.id)
 
-from rich.live import Live
-
-with Live(layout, refresh_per_second=10, screen=True):
-    while not overall_progress.finished:
-        sleep(0.1)
-        for job in job_progress.tasks:
-            if not job.finished:
-                job_progress.advance(job.id)
-
-        completed = sum(task.completed for task in job_progress.tasks)
-        overall_progress.update(overall_task, completed=completed)
+            completed = sum(task.completed for task in job_progress.tasks)
+            overall_progress.update(overall_task, completed=completed)

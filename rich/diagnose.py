@@ -2,15 +2,20 @@ import os
 import platform
 
 from rich import inspect
-from rich.console import Console, get_windows_console_features
+from rich._console_entry import Console
 from rich.panel import Panel
 from rich.pretty import Pretty
 
 
 def report() -> None:  # pragma: no cover
     """Print a report to the terminal with debugging information"""
+    import importlib as _importlib
+
     console = Console()
     inspect(console)
+    get_windows_console_features = _importlib.import_module(
+        "rich.console"
+    ).get_windows_console_features
     features = get_windows_console_features()
     inspect(features)
 

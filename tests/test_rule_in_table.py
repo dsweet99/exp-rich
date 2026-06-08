@@ -4,7 +4,7 @@ from textwrap import dedent
 import pytest
 
 from rich import box
-from rich.console import Console
+from rich._console_entry import Console
 from rich.rule import Rule
 from rich.table import Table
 

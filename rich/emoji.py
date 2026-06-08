@@ -1,21 +1,12 @@
-import sys
-from typing import TYPE_CHECKING, Literal, Optional, Union
+import importlib as _importlib
+from typing import Optional, Union
 
 from ._emoji_replace import _emoji_replace
+from ._no_emoji import EmojiVariant, NoEmoji
 from .jupyter import JupyterMixin
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import Style
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
-
-
-EmojiVariant = Literal["emoji", "text"]
-
-
-class NoEmoji(Exception):
-    """No emoji by that name."""
-
+from ._render_protocol import Console, ConsoleOptions, RenderResult
 
 class Emoji(JupyterMixin):
     __slots__ = ["name", "style", "_char", "variant"]
@@ -37,7 +28,7 @@ class Emoji(JupyterMixin):
         Raises:
             NoEmoji: If the emoji doesn't exist.
         """
-        from ._emoji_codes import EMOJI
+        EMOJI = _importlib.import_module("._emoji_codes", __package__).EMOJI
 
         self.name = name
         self.style = style
@@ -71,23 +62,3 @@ class Emoji(JupyterMixin):
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
         yield Segment(self._char, console.get_style(self.style))
-
-
-if __name__ == "__main__":  # pragma: no cover
-    import sys
-
-    from rich.columns import Columns
-    from rich.console import Console
-
-    console = Console(record=True)
-
-    from ._emoji_codes import EMOJI
-
-    columns = Columns(
-        (f":{name}: {name}" for name in sorted(EMOJI.keys()) if "\u200d" not in name),
-        column_first=True,
-    )
-
-    console.print(columns)
-    if len(sys.argv) > 1:
-        console.save_html(sys.argv[1])

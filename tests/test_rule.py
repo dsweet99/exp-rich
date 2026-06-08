@@ -2,7 +2,7 @@ import io
 
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.rule import Rule
 from rich.text import Text
 

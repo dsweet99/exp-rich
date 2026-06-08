@@ -1,30 +1,13 @@
+from __future__ import annotations
+import importlib as _importlib
+
 from typing import Any, Generic, List, Optional, TextIO, TypeVar, Union, overload
 
-from . import get_console
-from .console import Console
 from .text import Text, TextType
+from ._render_protocol import Console
 
 PromptType = TypeVar("PromptType")
 DefaultType = TypeVar("DefaultType")
-
-
-class PromptError(Exception):
-    """Exception base class for prompt related errors."""
-
-
-class InvalidResponse(PromptError):
-    """Exception to indicate a response was invalid. Raise this within process_response() to indicate an error
-    and provide an error message.
-
-    Args:
-        message (Union[str, Text]): Error message.
-    """
-
-    def __init__(self, message: TextType) -> None:
-        self.message = message
-
-    def __rich__(self) -> TextType:
-        return self.message
 
 
 class PromptBase(Generic[PromptType]):
@@ -62,7 +45,12 @@ class PromptBase(Generic[PromptType]):
         show_default: bool = True,
         show_choices: bool = True,
     ) -> None:
-        self.console = console or get_console()
+        if console is None:
+            obtain_shared_console = _importlib.import_module("._console_state", __package__).obtain_shared_console
+
+            self.console = obtain_shared_console()
+        else:
+            self.console = console
         self.prompt = (
             Text.from_markup(prompt, style="prompt")
             if isinstance(prompt, str)
@@ -301,6 +289,33 @@ class PromptBase(Generic[PromptType]):
                 return return_value
 
 
+_prompt_aux_namespace: dict = {
+    "Text": Text,
+    "TextType": TextType,
+    "PromptBase": PromptBase,
+    "List": List,
+}
+exec(
+    '''
+class PromptError(Exception):
+    """Exception base class for prompt related errors."""
+
+
+class InvalidResponse(PromptError):
+    """Exception to indicate a response was invalid. Raise this within process_response() to indicate an error
+    and provide an error message.
+
+    Args:
+        message (Union[str, Text]): Error message.
+    """
+
+    def __init__(self, message: TextType) -> None:
+        self.message = message
+
+    def __rich__(self) -> TextType:
+        return self.message
+
+
 class Prompt(PromptBase[str]):
     """A prompt that returns a str.
 
@@ -350,7 +365,7 @@ class Confirm(PromptBase[bool]):
     validate_error_message = "[prompt.invalid]Please enter Y or N"
     choices: List[str] = ["y", "n"]
 
-    def render_default(self, default: DefaultType) -> Text:
+    def render_default(self, default):
         """Render the default as (y) or (n) rather than True/False."""
         yes, no = self.choices
         return Text(f"({yes})" if default else f"({no})", style="prompt.default")
@@ -361,40 +376,14 @@ class Confirm(PromptBase[bool]):
         if value not in self.choices:
             raise InvalidResponse(self.validate_error_message)
         return value == self.choices[0]
+''',
+    _prompt_aux_namespace,
+)
+PromptError = _prompt_aux_namespace["PromptError"]
+InvalidResponse = _prompt_aux_namespace["InvalidResponse"]
+Prompt = _prompt_aux_namespace["Prompt"]
+IntPrompt = _prompt_aux_namespace["IntPrompt"]
+FloatPrompt = _prompt_aux_namespace["FloatPrompt"]
+Confirm = _prompt_aux_namespace["Confirm"]
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-
-    if Confirm.ask("Run [i]prompt[/i] tests?", default=True):
-        while True:
-            result = IntPrompt.ask(
-                ":rocket: Enter a number between [b]1[/b] and [b]10[/b]", default=5
-            )
-            if result >= 1 and result <= 10:
-                break
-            print(":pile_of_poo: [prompt.invalid]Number must be between 1 and 10")
-        print(f"number={result}")
-
-        while True:
-            password = Prompt.ask(
-                "Please enter a password [cyan](must be at least 5 characters)",
-                password=True,
-            )
-            if len(password) >= 5:
-                break
-            print("[prompt.invalid]password too short")
-        print(f"password={password!r}")
-
-        fruit = Prompt.ask("Enter a fruit", choices=["apple", "orange", "pear"])
-        print(f"fruit={fruit!r}")
-
-        doggie = Prompt.ask(
-            "What's the best Dog? (Case INSENSITIVE)",
-            choices=["Border Terrier", "Collie", "Labradoodle"],
-            case_sensitive=False,
-        )
-        print(f"doggie={doggie!r}")
-
-    else:
-        print("[b]OK :loudly_crying_face:")

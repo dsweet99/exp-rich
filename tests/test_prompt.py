@@ -1,45 +1,48 @@
 import io
 
-from rich.console import Console
-from rich.prompt import Confirm, IntPrompt, Prompt
+
+def _ask_prompt_with_retry(
+    input_text: str, *, case_sensitive: bool = True
+) -> tuple[str, str]:
+    from rich._console_entry import Console
+    from rich.prompt import Prompt
+
+    console = Console(file=io.StringIO())
+    name = Prompt.ask(
+        "what is your name",
+        console=console,
+        choices=["foo", "bar"],
+        default="baz",
+        case_sensitive=case_sensitive,
+        stream=io.StringIO(input_text),
+    )
+    return name, console.file.getvalue()
 
 
 def test_prompt_str():
-    INPUT = "egg\nfoo"
-    console = Console(file=io.StringIO())
-    name = Prompt.ask(
-        "what is your name",
-        console=console,
-        choices=["foo", "bar"],
-        default="baz",
-        stream=io.StringIO(INPUT),
-    )
+    name, output = _ask_prompt_with_retry("egg\nfoo")
     assert name == "foo"
-    expected = "what is your name [foo/bar] (baz): Please select one of the available options\nwhat is your name [foo/bar] (baz): "
-    output = console.file.getvalue()
     print(repr(output))
-    assert output == expected
+    assert output == (
+        "what is your name [foo/bar] (baz): Please select one of the available options\n"
+        "what is your name [foo/bar] (baz): "
+    )
 
 
 def test_prompt_str_case_insensitive():
-    INPUT = "egg\nFoO"
-    console = Console(file=io.StringIO())
-    name = Prompt.ask(
-        "what is your name",
-        console=console,
-        choices=["foo", "bar"],
-        default="baz",
-        case_sensitive=False,
-        stream=io.StringIO(INPUT),
-    )
+    name, output = _ask_prompt_with_retry("egg\nFoO", case_sensitive=False)
     assert name == "foo"
-    expected = "what is your name [foo/bar] (baz): Please select one of the available options\nwhat is your name [foo/bar] (baz): "
-    output = console.file.getvalue()
     print(repr(output))
-    assert output == expected
+    assert output == (
+        "what is your name [foo/bar] (baz): Please select one of the available options\n"
+        "what is your name [foo/bar] (baz): "
+    )
 
 
 def test_prompt_str_default():
+    from rich._console_entry import Console
+    from rich.prompt import Prompt
+
     INPUT = ""
     console = Console(file=io.StringIO())
     name = Prompt.ask(
@@ -56,6 +59,9 @@ def test_prompt_str_default():
 
 
 def test_prompt_int():
+    from rich._console_entry import Console
+    from rich.prompt import IntPrompt
+
     INPUT = "foo\n100"
     console = Console(file=io.StringIO())
     number = IntPrompt.ask(
@@ -71,6 +77,9 @@ def test_prompt_int():
 
 
 def test_prompt_confirm_no():
+    from rich._console_entry import Console
+    from rich.prompt import Confirm
+
     INPUT = "foo\nNO\nn"
     console = Console(file=io.StringIO())
     answer = Confirm.ask(
@@ -86,6 +95,9 @@ def test_prompt_confirm_no():
 
 
 def test_prompt_confirm_yes():
+    from rich._console_entry import Console
+    from rich.prompt import Confirm
+
     INPUT = "foo\nNO\ny"
     console = Console(file=io.StringIO())
     answer = Confirm.ask(
@@ -101,6 +113,9 @@ def test_prompt_confirm_yes():
 
 
 def test_prompt_confirm_default():
+    from rich._console_entry import Console
+    from rich.prompt import Confirm
+
     INPUT = "foo\nNO\ny"
     console = Console(file=io.StringIO())
     answer = Confirm.ask(
@@ -114,6 +129,9 @@ def test_prompt_confirm_default():
 
 
 def test_prompt_confirm_markup():
+    from rich._console_entry import Console
+    from rich.prompt import Confirm
+
     INPUT = "foo\nNO\ny"
     console = Console(file=io.StringIO(), markup=False)
     answer = Confirm.ask(

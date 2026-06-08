@@ -1,4 +1,13 @@
 # coding=utf-8
+import importlib as _importlib
+
+import io
+
+from .render import replace_link_ids
+
+Console = _importlib.import_module("rich._console_entry").Console
+RenderableType = _importlib.import_module("rich._console_entry").RenderableType
+Markdown = _importlib.import_module("rich.markdown").Markdown
 
 MARKDOWN = """Heading
 =======
@@ -68,23 +77,6 @@ foobar
 
        Code block
 """
-
-import io
-import re
-
-from rich.console import Console, RenderableType
-from rich.markdown import Markdown
-
-re_link_ids = re.compile(r"id=[\d\.\-]*?;.*?\x1b")
-
-
-def replace_link_ids(render: str) -> str:
-    """Link IDs have a random ID and system path which is a problem for
-    reproducible tests.
-
-    """
-    return re_link_ids.sub("id=0;foo\x1b", render)
-
 
 def render(renderable: RenderableType) -> str:
     console = Console(

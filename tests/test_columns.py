@@ -3,7 +3,7 @@
 import io
 
 from rich.columns import Columns
-from rich.console import Console
+from rich._console_entry import Console
 
 COLUMN_DATA = [
     "Ursus americanus",
@@ -28,14 +28,7 @@ COLUMN_DATA = [
 ]
 
 
-def render():
-    console = Console(file=io.StringIO(), width=100, legacy_windows=False)
-
-    console.rule("empty")
-    empty_columns = Columns([])
-    console.print(empty_columns)
-    columns = Columns(COLUMN_DATA)
-    columns.add_renderable("Myrmecophaga tridactyla")
+def _render_column_variants(console: Console, columns: Columns) -> None:
     console.rule("optimal")
     console.print(columns)
     console.rule("optimal, expand")
@@ -57,6 +50,15 @@ def render():
     columns.expand = False
     console.print(columns)
     console.print()
+
+
+def render():
+    console = Console(file=io.StringIO(), width=100, legacy_windows=False)
+    console.rule("empty")
+    console.print(Columns([]))
+    columns = Columns(COLUMN_DATA)
+    columns.add_renderable("Myrmecophaga tridactyla")
+    _render_column_variants(console, columns)
     render_result = console.file.getvalue()
     print(render_result)
     print(repr(render_result))

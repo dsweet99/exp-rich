@@ -1,4 +1,4 @@
-from rich.console import Console
+from rich._console_entry import Console
 from rich.panel import Panel
 from rich.pretty import Pretty
 from rich._timer import timer

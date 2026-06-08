@@ -1,11 +1,14 @@
+from __future__ import annotations
+
 from typing import Optional, Union
 
+from ._measure_fixed_width import measure_fixed_width
 from .color import Color
-from .console import Console, ConsoleOptions, RenderResult
 from .jupyter import JupyterMixin
 from .measure import Measurement
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import Style
+from ._render_protocol import Console, ConsoleOptions, RenderResult
 
 # There are left-aligned characters for 1/8 to 7/8, but
 # the right-aligned characters exist only for 1/8 and 4/8.
@@ -86,8 +89,4 @@ class Bar(JupyterMixin):
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
     ) -> Measurement:
-        return (
-            Measurement(self.width, self.width)
-            if self.width is not None
-            else Measurement(4, options.max_width)
-        )
+        return measure_fixed_width(self.width, options)

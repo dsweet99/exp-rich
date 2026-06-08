@@ -1,39 +1,73 @@
-import io
 import re
-
-from rich.__main__ import make_test_card
-from rich.console import Console, RenderableType
-
-from ._card_render import expected
-
-re_link_ids = re.compile(r"id=[\d\.\-]*?;.*?\x1b")
-
-
-def replace_link_ids(render: str) -> str:
-    """Link IDs have a random ID and system path which is a problem for
-    reproducible tests.
-
-    """
-    return re_link_ids.sub("id=0;foo\x1b", render)
-
-
-def render(renderable: RenderableType) -> str:
-    console = Console(
-        width=100, file=io.StringIO(), color_system="truecolor", legacy_windows=False
-    )
-    console.print(renderable)
-    output = replace_link_ids(console.file.getvalue())
-    return output
+from unittest.mock import patch
 
 
 def test_card_render():
+    from examples.rich_test_card import make_test_card
+
+    from ._card_render import expected
+    from .render import render
+
     card = make_test_card()
     result = render(card)
     print(repr(result))
     assert result == expected
 
 
+def test_colorbox_measure():
+    from rich._console_entry import Console
+    from rich.measure import Measurement
+
+    from examples.rich_test_card import ColorBox
+
+    console = Console(width=80)
+    box = ColorBox()
+    for width in (1, 2, 17, 80):
+        options = console.options.update_width(width)
+        assert box.__rich_measure__(console, options) == Measurement(1, width)
+
+
+def test_colorbox_segment_stream():
+    from rich._console_entry import Console
+
+    from examples.rich_test_card import ColorBox
+
+    console = Console(width=20)
+    box = ColorBox()
+    for max_width in (1, 2, 17):
+        options = console.options.update_width(max_width)
+        segments = list(box.__rich_console__(console, options))
+        glyph_segments = [segment for segment in segments if segment.text != "\n"]
+        line_segments = [segment for segment in segments if segment.text == "\n"]
+        assert len(glyph_segments) == 5 * max_width
+        assert len(line_segments) == 5
+        assert all(segment.text == "▄" for segment in glyph_segments)
+        assert all(
+            segment.style.color is not None and segment.style.bgcolor is not None
+            for segment in glyph_segments
+        )
+
+
+def test_run_test_card(capsys):
+    from examples.rich_test_card import run_test_card
+
+    with patch(
+        "examples.rich_test_card.process_time",
+        side_effect=[0.0, 0.001, 0.002, 0.003],
+    ):
+        run_test_card()
+    captured = capsys.readouterr()
+    assert "cold cache" in captured.out
+    assert "warm cache" in captured.out
+    assert "Hope you enjoy using Rich!" in captured.out
+    assert re.search(r"rendered in \d+\.\d+ms", captured.out)
+
+
 if __name__ == "__main__":
+    from examples.rich_test_card import make_test_card
+
+    from .render import render
+
     card = make_test_card()
     with open("_card_render.py", "wt") as fh:
         card_render = render(card)

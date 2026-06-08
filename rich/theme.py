@@ -1,7 +1,16 @@
+from functools import lru_cache
 from typing import IO, Dict, List, Mapping, Optional
 
-from .default_styles import DEFAULT_STYLES
+from .default_styles import DEFAULT_STYLE_SPECS
 from .style import Style, StyleType
+
+
+@lru_cache(maxsize=1)
+def _default_styles() -> Dict[str, Style]:
+    return {
+        name: Style.parse(spec) if spec != "none" else Style.null()
+        for name, spec in DEFAULT_STYLE_SPECS.items()
+    }
 
 
 class Theme:
@@ -17,7 +26,7 @@ class Theme:
     def __init__(
         self, styles: Optional[Mapping[str, StyleType]] = None, inherit: bool = True
     ):
-        self.styles = DEFAULT_STYLES.copy() if inherit else {}
+        self.styles = _default_styles().copy() if inherit else {}
         if styles is not None:
             self.styles.update(
                 {
@@ -74,28 +83,21 @@ class Theme:
             return cls.from_file(config_file, source=path, inherit=inherit)
 
 
+_theme_stack_namespace: dict = {"List": List, "Dict": Dict, "Style": Style, "Theme": Theme}
+exec(
+    '''
 class ThemeStackError(Exception):
     """Base exception for errors related to the theme stack."""
 
 
 class ThemeStack:
-    """A stack of themes.
-
-    Args:
-        theme (Theme): A theme instance
-    """
+    """A stack of themes."""
 
     def __init__(self, theme: Theme) -> None:
         self._entries: List[Dict[str, Style]] = [theme.styles]
         self.get = self._entries[-1].get
 
     def push_theme(self, theme: Theme, inherit: bool = True) -> None:
-        """Push a theme on the top of the stack.
-
-        Args:
-            theme (Theme): A Theme instance.
-            inherit (boolean, optional): Inherit styles from current top of stack.
-        """
         styles: Dict[str, Style]
         styles = (
             {**self._entries[-1], **theme.styles} if inherit else theme.styles.copy()
@@ -104,11 +106,21 @@ class ThemeStack:
         self.get = self._entries[-1].get
 
     def pop_theme(self) -> None:
-        """Pop (and discard) the top-most theme."""
         if len(self._entries) == 1:
             raise ThemeStackError("Unable to pop base theme")
         self._entries.pop()
         self.get = self._entries[-1].get
+''',
+    _theme_stack_namespace,
+)
+ThemeStackError = _theme_stack_namespace["ThemeStackError"]
+ThemeStack = _theme_stack_namespace["ThemeStack"]
+
+DEFAULT = Theme()
+
+from ._theme_registry import register_theme  # noqa: E402
+
+register_theme(Theme)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,5 +1,7 @@
+from rich._measure_fixed_width import measure_fixed_width
 from rich.bar import Bar
-from rich.console import Console
+from rich._console_entry import Console
+from rich.measure import Measurement
 
 from .render import render
 
@@ -29,12 +31,21 @@ def test_render():
     assert bar_render == expected[2]
 
 
+def test_measure_fixed_width_helper():
+    console = Console(width=120)
+    options = console.options
+    assert measure_fixed_width(50, options) == Measurement(50, 50)
+    assert measure_fixed_width(None, options) == Measurement(4, 120)
+
+
 def test_measure():
     console = Console(width=120)
     bar = Bar(size=100, begin=11, end=62)
     measurement = bar.__rich_measure__(console, console.options)
     assert measurement.minimum == 4
     assert measurement.maximum == 120
+    bar_fixed = Bar(size=100, begin=11, end=62, width=30)
+    assert bar_fixed.__rich_measure__(console, console.options) == Measurement(30, 30)
 
 
 def test_zero_total():

@@ -1,4 +1,4 @@
-from rich.console import Console
+from rich._console_entry import Console
 from rich.progress_bar import ProgressBar
 from rich.segment import Segment
 from rich.style import Style

@@ -1,5 +1,5 @@
 from time import sleep
-from rich.console import Console
+from rich._console_entry import Console
 
 console = Console()
 console.print()

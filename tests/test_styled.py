@@ -1,6 +1,6 @@
 import io
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.measure import Measurement
 from rich.styled import Styled
 

@@ -2,7 +2,7 @@
 Demonstrates export console output
 """
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.table import Table
 
 console = Console(record=True)
@@ -23,34 +23,35 @@ def print_table():
     console.print(table)
 
 
-# Prints table
-print_table()
+if __name__ == "__main__":
+    # Prints table
+    print_table()
 
-# Get console output as text
-file1 = "table_export_plaintext.txt"
-text = console.export_text()
-with open(file1, "w") as file:
-    file.write(text)
-print(f"Exported console output as plain text to {file1}")
+    # Get console output as text
+    file1 = "table_export_plaintext.txt"
+    text = console.export_text()
+    with open(file1, "w") as file:
+        file.write(text)
+    print(f"Exported console output as plain text to {file1}")
 
-# Calling print_table again because console output buffer
-# is flushed once export function is called
-print_table()
+    # Calling print_table again because console output buffer
+    # is flushed once export function is called
+    print_table()
 
-# Get console output as html
-# use clear=False so output is not flushed after export
-file2 = "table_export_html.html"
-html = console.export_html(clear=False)
-with open(file2, "w") as file:
-    file.write(html)
-print(f"Exported console output as html to {file2}")
+    # Get console output as html
+    # use clear=False so output is not flushed after export
+    file2 = "table_export_html.html"
+    html = console.export_html(clear=False)
+    with open(file2, "w") as file:
+        file.write(html)
+    print(f"Exported console output as html to {file2}")
 
-# Export text output to table_export.txt
-file3 = "table_export_plaintext2.txt"
-console.save_text(file3, clear=False)
-print(f"Exported console output as plain text to {file3}")
+    # Export text output to table_export.txt
+    file3 = "table_export_plaintext2.txt"
+    console.save_text(file3, clear=False)
+    print(f"Exported console output as plain text to {file3}")
 
-# Export html output to table_export.html
-file4 = "table_export_html2.html"
-console.save_html(file4)
-print(f"Exported console output as html to {file4}")
+    # Export html output to table_export.html
+    file4 = "table_export_html2.html"
+    console.save_html(file4)
+    print(f"Exported console output as html to {file4}")

@@ -1,6 +1,6 @@
 from time import sleep
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.spinner import Spinner
 from rich.status import Status
 

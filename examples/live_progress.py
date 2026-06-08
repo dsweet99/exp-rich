@@ -4,12 +4,17 @@ Demonstrates the use of multiple Progress instances in a single Live display.
 
 """
 
+import importlib as _importlib
 from time import sleep
 
-from rich.live import Live
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn
-from rich.table import Table
+Live = _importlib.import_module("rich.live").Live
+Panel = _importlib.import_module("rich.panel").Panel
+_progress = _importlib.import_module("rich.progress")
+Progress = _progress.Progress
+SpinnerColumn = _progress.SpinnerColumn
+BarColumn = _progress.BarColumn
+TextColumn = _progress.TextColumn
+Table = _importlib.import_module("rich.table").Table
 
 
 job_progress = Progress(

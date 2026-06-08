@@ -5,7 +5,14 @@ import tempfile
 import pytest
 
 from rich.style import Style
-from rich.theme import Theme, ThemeStack, ThemeStackError
+from rich.theme import Theme, ThemeStack, ThemeStackError, _default_styles
+
+
+def test_default_styles_specs():
+    styles = _default_styles()
+    assert len(styles) >= 150
+    assert styles["bold"] == Style.parse("bold")
+    assert styles["none"] == Style.null()
 
 
 def test_inherit():

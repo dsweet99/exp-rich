@@ -1,4 +1,4 @@
-from rich.console import Console
+from rich._console_entry import Console
 from rich.screen import Screen
 
 

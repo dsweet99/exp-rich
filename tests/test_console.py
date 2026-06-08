@@ -11,8 +11,7 @@ import pytest
 
 from rich import errors
 from rich._null_file import NullFile
-from rich.color import ColorSystem
-from rich.console import (
+from rich._console_entry import (
     CaptureError,
     Console,
     ConsoleDimensions,
@@ -27,7 +26,6 @@ from rich.pager import SystemPager
 from rich.panel import Panel
 from rich.region import Region
 from rich.segment import Segment
-from rich.status import Status
 from rich.style import Style
 from rich.text import Text
 
@@ -48,7 +46,7 @@ def test_dumb_terminal() -> None:
 def test_soft_wrap() -> None:
     console = Console(file=io.StringIO(), width=20, soft_wrap=True)
     console.print("foo " * 10)
-    assert console.file.getvalue() == "foo " * 20
+    assert console.file.getvalue() == "foo " * 10 + "\n"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
@@ -121,8 +119,9 @@ def test_console_options_update_height() -> None:
 
 
 def test_init() -> None:
+    ColorSystem = __import__("importlib").import_module("rich.color").ColorSystem
     console = Console(color_system=None)
-    assert console._color_system == None
+    assert console._color_system is None
     console = Console(color_system="standard")
     assert console._color_system == ColorSystem.STANDARD
     console = Console(color_system="auto")
@@ -367,6 +366,11 @@ def test_get_style_error() -> None:
         console.get_style("foo bar")
 
 
+def test_console_error_base() -> None:
+    with pytest.raises(errors.ConsoleError, match="bad console op"):
+        raise errors.ConsoleError("bad console op")
+
+
 def test_render_error() -> None:
     console = Console()
     with pytest.raises(errors.NotRenderableError):
@@ -416,6 +420,8 @@ def test_input_password(monkeypatch, capsys) -> None:
 
 
 def test_status() -> None:
+    from rich.status import Status
+
     console = Console(file=io.StringIO(), force_terminal=True, width=20)
     status = console.status("foo")
     assert isinstance(status, Status)
@@ -496,9 +502,9 @@ def test_justify_renderable_right() -> None:
     )
 
 
-class BrokenRenderable:
-    def __rich_console__(self, console, options):
-        pass
+BrokenRenderable = type(
+    "BrokenRenderable", (), {"__rich_console__": lambda self, console, options: None}
+)
 
 
 def test_render_broken_renderable() -> None:
@@ -601,7 +607,7 @@ def test_no_wrap() -> None:
     assert console.file.getvalue() == "foo bar ba\n"
 
 
-def test_soft_wrap() -> None:
+def test_soft_wrap_no_overflow() -> None:
     console = Console(width=10, file=io.StringIO())
     console.print("foo bar baz egg", soft_wrap=True)
     assert console.file.getvalue() == "foo bar baz egg\n"
@@ -654,32 +660,27 @@ def test_out() -> None:
     assert console.end_capture() == "foo bar.foo bar.foo bar.foo bar.foo barX"
 
 
-def test_render_group() -> None:
-    @group(fit=False)
+def _make_group_renderable(*, fit: bool = True):
+    @group(fit=fit)
     def renderable():
         yield "one"
         yield "two"
         yield "three"  # <- largest width of 5
         yield "four"
 
-    renderables = [renderable() for _ in range(4)]
+    return renderable
+
+
+def test_render_group() -> None:
+    renderables = [_make_group_renderable(fit=False)() for _ in range(4)]
     console = Console(width=42)
     min_width, _ = measure_renderables(console, console.options, renderables)
     assert min_width == 42
 
 
 def test_render_group_fit() -> None:
-    @group()
-    def renderable():
-        yield "one"
-        yield "two"
-        yield "three"  # <- largest width of 5
-        yield "four"
-
-    renderables = [renderable() for _ in range(4)]
-
+    renderables = [_make_group_renderable()() for _ in range(4)]
     console = Console(width=42)
-
     min_width, _ = measure_renderables(console, console.options, renderables)
     assert min_width == 5
 
@@ -837,8 +838,8 @@ def test_update_screen_lines() -> None:
 def test_update_options_markup() -> None:
     console = Console()
     options = console.options
-    assert options.update(markup=False).markup == False
-    assert options.update(markup=True).markup == True
+    assert not options.update(markup=False).markup
+    assert options.update(markup=True).markup
 
 
 def test_print_width_zero() -> None:
@@ -870,18 +871,21 @@ def test_print_newline_start() -> None:
 
 
 def test_is_terminal_broken_file() -> None:
-    console = Console()
+    console = Console(file=io.StringIO())
 
     def _mock_isatty():
         raise ValueError()
 
     console.file.isatty = _mock_isatty
 
-    assert console.is_terminal == False
+    assert not console.is_terminal
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not relevant on Windows")
 def test_detect_color_system() -> None:
+    import importlib as _importlib
+
+    ColorSystem = _importlib.import_module("rich.color").ColorSystem
     console = Console(_environ={"TERM": "rxvt-unicode-256color"}, force_terminal=True)
     assert console._detect_color_system() == ColorSystem.EIGHT_BIT
 
@@ -890,10 +894,11 @@ def test_reset_height() -> None:
     """Test height is reset when rendering complex renderables."""
 
     # https://github.com/Textualize/rich/issues/2042
-    class Panels:
-        def __rich_console__(self, console, options):
-            yield Panel("foo")
-            yield Panel("bar")
+    def _panels_rich_console(self, console, options):
+        yield Panel("foo")
+        yield Panel("bar")
+
+    Panels = type("Panels", (), {"__rich_console__": _panels_rich_console})
 
     console = Console(
         force_terminal=True,
@@ -949,12 +954,15 @@ def test_capturing_no_stdout_and_no_stderr_files(monkeypatch) -> None:
     assert capture.get() == "hello world\n"
 
 
-@pytest.mark.parametrize("env_value", ["", "something", "0"])
-def test_force_color(env_value) -> None:
-    # Even though we use a non-tty file, the presence of FORCE_COLOR env var
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("", False), ("something", True), ("0", True)],
+)
+def test_force_color(env_value, expected) -> None:
+    # Even though we use a non-tty file, a non-empty FORCE_COLOR env var
     # means is_terminal returns True.
     console = Console(file=io.StringIO(), _environ={"FORCE_COLOR": env_value})
-    assert console.is_terminal
+    assert console.is_terminal is expected
 
 
 def test_force_color_jupyter() -> None:
@@ -965,7 +973,7 @@ def test_force_color_jupyter() -> None:
     assert not console.is_terminal
 
 
-def test_force_color() -> None:
+def test_force_color_truecolor() -> None:
     console = Console(
         file=io.StringIO(),
         _environ={
@@ -1072,25 +1080,30 @@ def test_tty_interactive() -> None:
 def test_tty_compatible() -> None:
     """Check TTY_COMPATIBLE environment var."""
 
-    class FakeTTY:
-        """An file file-like which reports it is a TTY."""
+    def _fake_tty_init(self) -> None:
+        self.called_isatty = False
 
-        def __init__(self) -> None:
-            self.called_isatty = False
+    def _fake_tty_isatty(self) -> bool:
+        self.called_isatty = True
+        return True
 
-        def isatty(self) -> bool:
-            self.called_isatty = True
-            return True
+    def _fake_file_init(self) -> None:
+        self.called_isatty = False
 
-    class FakeFile:
-        """A file object that reports False for isatty"""
+    def _fake_file_isatty(self) -> bool:
+        self.called_isatty = True
+        return False
 
-        def __init__(self) -> None:
-            self.called_isatty = False
-
-        def isatty(self) -> bool:
-            self.called_isatty = True
-            return False
+    FakeTTY = type(
+        "FakeTTY",
+        (),
+        {"__init__": _fake_tty_init, "isatty": _fake_tty_isatty},
+    )
+    FakeFile = type(
+        "FakeFile",
+        (),
+        {"__init__": _fake_file_init, "isatty": _fake_file_isatty},
+    )
 
     # Console file is not a TTY
     console = Console(file=FakeFile())

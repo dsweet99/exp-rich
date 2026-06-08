@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rich._unicode_data import VERSIONS, _parse_version, load
+from rich._unicode_data._resolve import resolve_unicode_version
 
 
 def test_load():
@@ -62,3 +63,8 @@ def test_load_version_invalid() -> None:
     assert load("foo").unicode_version == "17.0.0"
     assert load("a.b.c").unicode_version == "17.0.0"
     assert load("1.2.3a").unicode_version == "17.0.0"
+
+
+def test_resolve_unicode_version() -> None:
+    assert resolve_unicode_version("latest") == VERSIONS[-1]
+    assert resolve_unicode_version("auto") == VERSIONS[-1]

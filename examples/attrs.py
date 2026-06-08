@@ -7,19 +7,8 @@ except ImportError:
     print("pip install attrs")
     raise SystemExit()
 
-
-@attr.define
-class Point3D:
-    x: float
-    y: float
-    z: float = 0
-
-
-@attr.define
-class Triangle:
-    point1: Point3D
-    point2: Point3D
-    point3: Point3D
+from examples.attrs_point3d import Point3D
+from examples.attrs_triangle import Triangle
 
 
 @attr.define
@@ -40,7 +29,7 @@ if __name__ == "__main__":
         ],
     )
 
-    from rich.console import Console
+    from rich._console_entry import Console
     from rich.pretty import Pretty
     from rich.table import Column, Table
     from rich.text import Text

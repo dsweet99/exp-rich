@@ -2,7 +2,7 @@
 Demonstrates how to render a table.
 """
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.table import Table
 
 table = Table(title="Star Wars Movies")

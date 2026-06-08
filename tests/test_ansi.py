@@ -1,9 +1,17 @@
 import pytest
 
-from rich.ansi import AnsiDecoder
-from rich.console import Console
+from rich.ansi import AnsiDecoder, _ansi_tokenize
+from rich._ansi_token import AnsiToken as _AnsiToken
+from rich._console_entry import Console
 from rich.style import Style
 from rich.text import Span, Text
+
+
+def test_ansi_token_tokenize():
+    tokens = list(_ansi_tokenize("Hello \033[1mWorld"))
+    assert tokens[0] == _AnsiToken("Hello ")
+    assert tokens[1] == _AnsiToken("", sgr="1", osc=None)
+    assert tokens[2] == _AnsiToken("World")
 
 
 def test_decode():
@@ -84,6 +92,28 @@ def test_strip_private_escape_sequences(code):
     expected = "x\n"
 
     assert capture.get() == expected
+
+
+@pytest.mark.parametrize(
+    "line,expected_plain",
+    [
+        ("\x1b[1mbold\x1b[0m", "bold"),
+        ("old\rnew", "new"),
+        (
+            "\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\",
+            "link",
+        ),
+        ("\x1b[38;5;196mred\x1b[0m", "red"),
+        ("\x1b[38;2;255;128;64mrgb\x1b[0m", "rgb"),
+        ("\x1b[48;5;21mblue\x1b[0m", "blue"),
+        ("\x1b[48;2;10;20;30mbg\x1b[0m", "bg"),
+        ("\x1b[999mclamped\x1b[0m", "clamped"),
+    ],
+)
+def test_decode_line_branches(line: str, expected_plain: str) -> None:
+    decoder = AnsiDecoder()
+    text = decoder.decode_line(line)
+    assert text.plain == expected_plain
 
 
 def test_decode_newlines():

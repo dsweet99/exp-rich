@@ -1,15 +1,16 @@
+# ruff: noqa: E402
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import Any, Optional, Tuple
 
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
-from .table import Table
+from ._align_types import OverflowMethod
+from ._highlighter_registry import repr_highlighter
+from ._render_factory import table_grid
+import importlib as _importlib
+
+Panel = _importlib.import_module(".panel", __package__).Panel
+Pretty = _importlib.import_module(".pretty", __package__).Pretty
 from .text import Text, TextType
-
-if TYPE_CHECKING:
-    from .console import ConsoleRenderable, OverflowMethod
-
+from ._render_protocol import ConsoleRenderable
 
 def render_scope(
     scope: "Mapping[str, Any]",
@@ -38,8 +39,8 @@ def render_scope(
     Returns:
         ConsoleRenderable: A renderable object.
     """
-    highlighter = ReprHighlighter()
-    items_table = Table.grid(padding=(0, 1), expand=False)
+    highlighter = repr_highlighter()
+    items_table = table_grid(padding=(0, 1), expand=False)
     items_table.add_column(justify="right")
 
     def sort_items(item: Tuple[str, Any]) -> Tuple[bool, str]:
@@ -71,22 +72,3 @@ def render_scope(
         border_style="scope.border",
         padding=(0, 1),
     )
-
-
-if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-
-    print()
-
-    def test(foo: float, bar: float) -> None:
-        list_of_things = [1, 2, 3, None, 4, True, False, "Hello World"]
-        dict_of_things = {
-            "version": "1.1",
-            "method": "confirmFruitPurchase",
-            "params": [["apple", "orange", "mangoes", "pomelo"], 1.123],
-            "id": "194521489",
-        }
-        print(render_scope(locals(), title="[i]locals", sort_keys=False))
-
-    test(20.3423, 3.1427)
-    print()

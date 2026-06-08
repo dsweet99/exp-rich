@@ -1,6 +1,6 @@
 import pytest
 
-from rich.console import ConsoleOptions, ConsoleDimensions
+from rich._console_entry import ConsoleOptions, ConsoleDimensions
 from rich.box import (
     ASCII,
     DOUBLE,

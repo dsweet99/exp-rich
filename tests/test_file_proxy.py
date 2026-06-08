@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.file_proxy import FileProxy
 
 

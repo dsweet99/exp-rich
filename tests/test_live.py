@@ -3,7 +3,7 @@ import time
 from typing import Optional
 
 # import pytest
-from rich.console import Console
+from rich._console_entry import Console
 from rich.live import Live
 from rich.text import Text
 
@@ -175,7 +175,7 @@ def test_live_empty() -> None:
     No NL should be written if there was nothing rendered.
     """
 
-    from rich.console import Group
+    from rich._console_entry import Group
 
     console = create_capture_console(width=20, height=5)
     console.begin_capture()

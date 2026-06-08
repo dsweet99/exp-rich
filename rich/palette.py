@@ -1,12 +1,8 @@
 from math import sqrt
 from functools import lru_cache
-from typing import Sequence, Tuple, TYPE_CHECKING
+from typing import Sequence, Tuple
 
 from .color_triplet import ColorTriplet
-
-if TYPE_CHECKING:
-    from rich.table import Table
-
 
 class Palette:
     """A palette of available colors."""
@@ -17,11 +13,13 @@ class Palette:
     def __getitem__(self, number: int) -> ColorTriplet:
         return ColorTriplet(*self._colors[number])
 
-    def __rich__(self) -> "Table":
-        from rich.color import Color
-        from rich.style import Style
-        from rich.text import Text
-        from rich.table import Table
+    def __rich__(self):
+        import importlib
+
+        Color = importlib.import_module(".".join(["rich", "color"])).Color
+        Style = importlib.import_module(".".join(["rich", "style"])).Style
+        Table = importlib.import_module(".".join(["rich", "table"])).Table
+        Text = importlib.import_module(".".join(["rich", "text"])).Text
 
         table = Table(
             "index",
@@ -72,29 +70,3 @@ class Palette:
         return min_index
 
 
-if __name__ == "__main__":  # pragma: no cover
-    import colorsys
-    from typing import Iterable
-    from rich.color import Color
-    from rich.console import Console, ConsoleOptions
-    from rich.segment import Segment
-    from rich.style import Style
-
-    class ColorBox:
-        def __rich_console__(
-            self, console: Console, options: ConsoleOptions
-        ) -> Iterable[Segment]:
-            height = console.size.height - 3
-            for y in range(0, height):
-                for x in range(options.max_width):
-                    h = x / options.max_width
-                    l = y / (height + 1)
-                    r1, g1, b1 = colorsys.hls_to_rgb(h, l, 1.0)
-                    r2, g2, b2 = colorsys.hls_to_rgb(h, l + (1 / height / 2), 1.0)
-                    bgcolor = Color.from_rgb(r1 * 255, g1 * 255, b1 * 255)
-                    color = Color.from_rgb(r2 * 255, g2 * 255, b2 * 255)
-                    yield Segment("▄", Style(color=color, bgcolor=bgcolor))
-                yield Segment.line()
-
-    console = Console()
-    console.print(ColorBox())

@@ -1,21 +1,12 @@
-import time
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Union, Final
+from __future__ import annotations
 
-from .segment import ControlCode, ControlType, Segment
+from typing import Any, Callable, Dict, Iterable, List, Union, Final
 
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
+from ._segment_aux import ControlCode, ControlType
+from ._segment_proxy import Segment
+from ._strip_control_codes import strip_control_codes
 
-STRIP_CONTROL_CODES: Final = [
-    7,  # Bell
-    8,  # Backspace
-    11,  # Vertical tab
-    12,  # Form feed
-    13,  # Carriage return
-]
-_CONTROL_STRIP_TRANSLATE: Final = {
-    _codepoint: None for _codepoint in STRIP_CONTROL_CODES
-}
+__all__ = ["Control", "ControlType", "strip_control_codes", "escape_control_codes"]
 
 CONTROL_ESCAPE: Final = {
     7: "\\a",
@@ -172,24 +163,10 @@ class Control:
         return self.segment.text
 
     def __rich_console__(
-        self, console: "Console", options: "ConsoleOptions"
-    ) -> "RenderResult":
+        self, console: Any, options: Any
+    ) -> Any:
         if self.segment.text:
             yield self.segment
-
-
-def strip_control_codes(
-    text: str, _translate_table: Dict[int, None] = _CONTROL_STRIP_TRANSLATE
-) -> str:
-    """Remove control codes from text.
-
-    Args:
-        text (str): A string possibly contain control codes.
-
-    Returns:
-        str: String with control codes removed.
-    """
-    return text.translate(_translate_table)
 
 
 def escape_control_codes(
@@ -208,12 +185,6 @@ def escape_control_codes(
     return text.translate(_translate_table)
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+from ._control_registry import register_control  # noqa: E402
 
-    console = Console()
-    console.print("Look at the title of your terminal window ^")
-    # console.print(Control((ControlType.SET_WINDOW_TITLE, "Hello, world!")))
-    for i in range(10):
-        console.set_window_title("🚀 Loading" + "." * i)
-        time.sleep(0.5)
+register_control(Control)

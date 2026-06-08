@@ -4,7 +4,7 @@ from typing import List
 
 import pytest
 
-from rich.console import Console, Group
+from rich._console_entry import Console, Group
 from rich.measure import Measurement
 from rich.style import Style
 from rich.text import Span, Text
@@ -403,11 +403,13 @@ def test_split_spans():
     assert lines[1].spans == [Span(0, 5, "red"), Span(0, 5, "bold")]
 
 
-def test_divide():
+def _assert_divide_empty() -> None:
     lines = Text("foo").divide([])
     assert len(lines) == 1
     assert lines[0] == Text("foo")
 
+
+def _assert_divide_bold_foo() -> None:
     text = Text()
     text.append("foo", "bold")
     lines = text.divide([1, 2])
@@ -419,6 +421,8 @@ def test_divide():
     assert lines[1]._spans == [Span(0, 1, "bold")]
     assert lines[2]._spans == [Span(0, 1, "bold")]
 
+
+def _assert_divide_colored_text() -> None:
     text = Text()
     text.append("foo", "red")
     text.append("bar", "green")
@@ -434,6 +438,12 @@ def test_divide():
     ]
     assert lines[1]._spans == [Span(0, 1, "blue")]
 
+
+def _assert_divide_at_one() -> None:
+    text = Text()
+    text.append("foo", "red")
+    text.append("bar", "green")
+    text.append("baz", "blue")
     lines = text.divide([1])
     assert len(lines) == 2
     assert str(lines[0]) == "f"
@@ -444,6 +454,13 @@ def test_divide():
         Span(2, 5, "green"),
         Span(5, 8, "blue"),
     ]
+
+
+def test_divide():
+    _assert_divide_empty()
+    _assert_divide_bold_foo()
+    _assert_divide_colored_text()
+    _assert_divide_at_one()
 
 
 def test_right_crop():

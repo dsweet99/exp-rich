@@ -11,6 +11,26 @@ class Edge(Protocol):
     minimum_size: int = 1
 
 
+def _ratio_distribute_flexible(
+    sizes: list,
+    edges: Sequence[Edge],
+    flexible_edges: list,
+    remaining: int,
+) -> None:
+    _Fraction = Fraction
+    portion = _Fraction(
+        remaining, sum((edge.ratio or 1) for _, edge in flexible_edges)
+    )
+    for index, edge in flexible_edges:
+        if portion * edge.ratio <= edge.minimum_size:
+            sizes[index] = edge.minimum_size
+            return
+    remainder = _Fraction(0)
+    for index, edge in flexible_edges:
+        size, remainder = divmod(portion * edge.ratio + remainder, 1)
+        sizes[index] = size
+
+
 def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
     """Divide total space to satisfy size, ratio, and minimum_size, constraints.
 
@@ -48,26 +68,11 @@ def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
                 ((edge.minimum_size or 1) if size is None else size)
                 for size, edge in zip(sizes, edges)
             ]
-        # Calculate number of characters in a ratio portion
-        portion = _Fraction(
-            remaining, sum((edge.ratio or 1) for _, edge in flexible_edges)
-        )
-
-        # If any edges will be less than their minimum, replace size with the minimum
-        for index, edge in flexible_edges:
-            if portion * edge.ratio <= edge.minimum_size:
-                sizes[index] = edge.minimum_size
-                # New fixed size will invalidate calculations, so we need to repeat the process
-                break
-        else:
-            # Distribute flexible space and compensate for rounding error
-            # Since edge sizes can only be integers we need to add the remainder
-            # to the following line
-            remainder = _Fraction(0)
-            for index, edge in flexible_edges:
-                size, remainder = divmod(portion * edge.ratio + remainder, 1)
-                sizes[index] = size
-            break
+        before = sizes.copy()
+        _ratio_distribute_flexible(sizes, edges, flexible_edges, remaining)
+        if sizes != before:
+            continue
+        break
     # Sizes now contains integers only
     return cast(List[int], sizes)
 
@@ -141,13 +146,4 @@ def ratio_distribute(
 
 
 if __name__ == "__main__":
-    from dataclasses import dataclass
-
-    @dataclass
-    class E:
-        size: Optional[int] = None
-        ratio: int = 1
-        minimum_size: int = 1
-
-    resolved = ratio_resolve(110, [E(None, 1, 1), E(None, 1, 1), E(None, 1, 1)])
-    print(sum(resolved))
+    print(ratio_resolve(110, []))

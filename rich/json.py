@@ -1,9 +1,12 @@
-from pathlib import Path
+from __future__ import annotations
 from json import loads, dumps
 from typing import Any, Callable, Optional, Union
 
-from .text import Text
-from .highlighter import JSONHighlighter, NullHighlighter
+
+def _highlight_json(json: str, highlight: bool) -> Any:
+    from ._json_highlight import highlight_json
+
+    return highlight_json(json, highlight)
 
 
 class JSON:
@@ -45,8 +48,7 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
-        highlighter = JSONHighlighter() if highlight else NullHighlighter()
-        self.text = highlighter(json)
+        self.text = _highlight_json(json, highlight)
         self.text.no_wrap = True
         self.text.overflow = None
 
@@ -92,48 +94,10 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
-        highlighter = JSONHighlighter() if highlight else NullHighlighter()
-        json_instance.text = highlighter(json)
+        json_instance.text = _highlight_json(json, highlight)
         json_instance.text.no_wrap = True
         json_instance.text.overflow = None
         return json_instance
 
-    def __rich__(self) -> Text:
+    def __rich__(self) -> Any:
         return self.text
-
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-
-    parser = argparse.ArgumentParser(description="Pretty print json")
-    parser.add_argument(
-        "path",
-        metavar="PATH",
-        help="path to file, or - for stdin",
-    )
-    parser.add_argument(
-        "-i",
-        "--indent",
-        metavar="SPACES",
-        type=int,
-        help="Number of spaces in an indent",
-        default=2,
-    )
-    args = parser.parse_args()
-
-    from rich.console import Console
-
-    console = Console()
-    error_console = Console(stderr=True)
-
-    try:
-        if args.path == "-":
-            json_data = sys.stdin.read()
-        else:
-            json_data = Path(args.path).read_text()
-    except Exception as error:
-        error_console.print(f"Unable to read {args.path!r}; {error}")
-        sys.exit(-1)
-
-    console.print(JSON(json_data, indent=args.indent), soft_wrap=True)

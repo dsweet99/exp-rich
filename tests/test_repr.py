@@ -1,92 +1,18 @@
-from typing import Optional
-
 import pytest
 
 import rich.repr
-from rich.console import Console
+from rich._console_entry import Console
 
-from inspect import Parameter
-
-
-@rich.repr.auto
-class Foo:
-    def __init__(self, foo: str, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
-
-    def __rich_repr__(self):
-        yield self.foo
-        yield None, self.foo,
-        yield "bar", self.bar, None
-        yield "egg", self.egg
-
-
-@rich.repr.auto
-class Egg:
-    def __init__(self, foo: str, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
-
-
-@rich.repr.auto
-class BrokenEgg:
-    def __init__(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.fubar = bar
-        self.egg = egg
-
-
-@rich.repr.auto(angular=True)
-class AngularEgg:
-    def __init__(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
-
-
-@rich.repr.auto
-class Bar(Foo):
-    def __rich_repr__(self):
-        yield (self.foo,)
-        yield None, self.foo,
-        yield "bar", self.bar, None
-        yield "egg", self.egg
-
-    __rich_repr__.angular = True
-
-
-class StupidClass:
-    def __init__(self, a):
-        self.a = a
-
-    def __eq__(self, other) -> bool:
-        if other is Parameter.empty:
-            return True
-        try:
-            return self.a == other.a
-        except Exception:
-            return False
-
-    def __ne__(self, other: object) -> bool:
-        return not self.__eq__(other)
-
-
-class NotStupid:
-    pass
-
-
-@rich.repr.auto
-class Bird:
-    def __init__(
-        self, name, eats, fly=True, another=StupidClass(2), extinct=NotStupid()
-    ):
-        self.name = name
-        self.eats = eats
-        self.fly = fly
-        self.another = another
-        self.extinct = extinct
+from tests._repr_fixtures import (
+    AngularEgg,
+    Bar,
+    Bird,
+    BrokenEgg,
+    Egg,
+    Foo,
+    NotStupid,
+    StupidClass,
+)
 
 
 def test_rich_repr() -> None:

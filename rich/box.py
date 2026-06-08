@@ -1,10 +1,8 @@
-from typing import TYPE_CHECKING, Iterable, List, Literal
+from typing import Iterable, List, Literal
 
-
+from ._box_row import box_row_edges, build_box_row
 from ._loop import loop_last
-
-if TYPE_CHECKING:
-    from rich.console import ConsoleOptions
+from ._render_protocol import ConsoleOptions
 
 
 class Box:
@@ -126,40 +124,8 @@ class Box:
         Returns:
             str: A string of box characters.
         """
-        if level == "head":
-            left = self.head_row_left
-            horizontal = self.head_row_horizontal
-            cross = self.head_row_cross
-            right = self.head_row_right
-        elif level == "row":
-            left = self.row_left
-            horizontal = self.row_horizontal
-            cross = self.row_cross
-            right = self.row_right
-        elif level == "mid":
-            left = self.mid_left
-            horizontal = " "
-            cross = self.mid_vertical
-            right = self.mid_right
-        elif level == "foot":
-            left = self.foot_row_left
-            horizontal = self.foot_row_horizontal
-            cross = self.foot_row_cross
-            right = self.foot_row_right
-        else:
-            raise ValueError("level must be 'head', 'row' or 'foot'")
-
-        parts: List[str] = []
-        append = parts.append
-        if edge:
-            append(left)
-        for last, width in loop_last(widths):
-            append(horizontal * width)
-            if not last:
-                append(cross)
-        if edge:
-            append(right)
-        return "".join(parts)
+        left, horizontal, cross, right = box_row_edges(self, level)
+        return build_box_row(left, horizontal, cross, right, widths, edge=edge)
 
     def get_bottom(self, widths: Iterable[int]) -> str:
         """Get the bottom of a simple box.
@@ -421,54 +387,5 @@ PLAIN_HEADED_SUBSTITUTIONS = {
 }
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from rich.columns import Columns
-    from rich.panel import Panel
-
-    from . import box as box
-    from .console import Console
-    from .table import Table
-    from .text import Text
-
-    console = Console(record=True)
-
-    BOXES = [
-        "ASCII",
-        "ASCII2",
-        "ASCII_DOUBLE_HEAD",
-        "SQUARE",
-        "SQUARE_DOUBLE_HEAD",
-        "MINIMAL",
-        "MINIMAL_HEAVY_HEAD",
-        "MINIMAL_DOUBLE_HEAD",
-        "SIMPLE",
-        "SIMPLE_HEAD",
-        "SIMPLE_HEAVY",
-        "HORIZONTALS",
-        "ROUNDED",
-        "HEAVY",
-        "HEAVY_EDGE",
-        "HEAVY_HEAD",
-        "DOUBLE",
-        "DOUBLE_EDGE",
-        "MARKDOWN",
-    ]
-
-    console.print(Panel("[bold green]Box Constants", style="green"), justify="center")
-    console.print()
-
-    columns = Columns(expand=True, padding=2)
-    for box_name in sorted(BOXES):
-        table = Table(
-            show_footer=True, style="dim", border_style="not dim", expand=True
-        )
-        table.add_column("Header 1", "Footer 1")
-        table.add_column("Header 2", "Footer 2")
-        table.add_row("Cell", "Cell")
-        table.add_row("Cell", "Cell")
-        table.box = getattr(box, box_name)
-        table.title = Text(f"box.{box_name}", style="magenta")
-        columns.add_renderable(table)
-    console.print(columns)
 
     # console.save_svg("box.svg")

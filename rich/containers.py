@@ -1,66 +1,21 @@
-from itertools import zip_longest
+from __future__ import annotations
+
+import importlib as _importlib
 from typing import (
-    TYPE_CHECKING,
     Iterable,
     Iterator,
     List,
-    Optional,
     TypeVar,
     Union,
     overload,
 )
 
-if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        JustifyMethod,
-        OverflowMethod,
-        RenderResult,
-        RenderableType,
-    )
-    from .text import Text
-
-from .cells import cell_len
-from .measure import Measurement
+from ._align_types import JustifyMethod, OverflowMethod
+from ._containers_renderables import Renderables  # noqa: F401
+from ._render_factory import register_renderables
+from ._render_protocol import Console, ConsoleOptions, RenderResult, Text
 
 T = TypeVar("T")
-
-
-class Renderables:
-    """A list subclass which renders its contents to the console."""
-
-    def __init__(
-        self, renderables: Optional[Iterable["RenderableType"]] = None
-    ) -> None:
-        self._renderables: List["RenderableType"] = (
-            list(renderables) if renderables is not None else []
-        )
-
-    def __rich_console__(
-        self, console: "Console", options: "ConsoleOptions"
-    ) -> "RenderResult":
-        """Console render method to insert line-breaks."""
-        yield from self._renderables
-
-    def __rich_measure__(
-        self, console: "Console", options: "ConsoleOptions"
-    ) -> "Measurement":
-        dimensions = [
-            Measurement.get(console, options, renderable)
-            for renderable in self._renderables
-        ]
-        if not dimensions:
-            return Measurement(1, 1)
-        _min = max(dimension.minimum for dimension in dimensions)
-        _max = max(dimension.maximum for dimension in dimensions)
-        return Measurement(_min, _max)
-
-    def append(self, renderable: "RenderableType") -> None:
-        self._renderables.append(renderable)
-
-    def __iter__(self) -> Iterable["RenderableType"]:
-        return iter(self._renderables)
 
 
 class Lines:
@@ -124,44 +79,24 @@ class Lines:
             overflow (str, optional): Default overflow for text: "crop", "fold", or "ellipsis". Defaults to "fold".
 
         """
-        from .text import Text
+        Text = _importlib.import_module(".text", __package__).Text
 
         if justify == "left":
-            for line in self._lines:
-                line.truncate(width, overflow=overflow, pad=True)
+            from ._lines_justify import justify_left
+
+            justify_left(self._lines, width, overflow)
         elif justify == "center":
-            for line in self._lines:
-                line.rstrip()
-                line.truncate(width, overflow=overflow)
-                line.pad_left((width - cell_len(line.plain)) // 2)
-                line.pad_right(width - cell_len(line.plain))
+            from ._lines_justify import justify_center
+
+            justify_center(self._lines, width, overflow)
         elif justify == "right":
-            for line in self._lines:
-                line.rstrip()
-                line.truncate(width, overflow=overflow)
-                line.pad_left(width - cell_len(line.plain))
+            from ._lines_justify import justify_right
+
+            justify_right(self._lines, width, overflow)
         elif justify == "full":
-            for line_index, line in enumerate(self._lines):
-                if line_index == len(self._lines) - 1:
-                    break
-                words = line.split(" ")
-                words_size = sum(cell_len(word.plain) for word in words)
-                num_spaces = len(words) - 1
-                spaces = [1 for _ in range(num_spaces)]
-                index = 0
-                if spaces:
-                    while words_size + num_spaces < width:
-                        spaces[len(spaces) - index - 1] += 1
-                        num_spaces += 1
-                        index = (index + 1) % len(spaces)
-                tokens: List[Text] = []
-                for index, (word, next_word) in enumerate(
-                    zip_longest(words, words[1:])
-                ):
-                    tokens.append(word)
-                    if index < len(spaces):
-                        style = word.get_style_at_offset(console, -1)
-                        next_style = next_word.get_style_at_offset(console, 0)
-                        space_style = style if style == next_style else line.style
-                        tokens.append(Text(" " * spaces[index], style=space_style))
-                self[line_index] = Text("").join(tokens)
+            from ._lines_justify import justify_full
+
+            justify_full(self._lines, console, width, Text)
+
+
+register_renderables(Renderables)

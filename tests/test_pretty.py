@@ -1,18 +1,25 @@
+import builtins
 import collections
 import io
 import sys
 from array import array
 from collections import UserDict, defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import field, make_dataclass
 from typing import Any, List, NamedTuple
 
 import attr
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.measure import Measurement
-from rich.pretty import Node, Pretty, _ipy_display_hook, install, pprint, pretty_repr
+from rich.pretty import Node, Pretty, _Line, _ipy_display_hook, install, pprint, pretty_repr
 from rich.text import Text
+
+install
+Node.iter_tokens
+Node.check_length
+_Line.expandable
+_Line.check_length
 
 skip_py38 = pytest.mark.skipif(
     sys.version_info.minor == 8 and sys.version_info.major == 3,
@@ -44,30 +51,85 @@ skip_py314 = pytest.mark.skipif(
 )
 
 
+def test_node_iter_tokens_and_check_length() -> None:
+    child = Node(value_repr="1", last=True)
+    parent = Node(open_brace="{", close_brace="}", children=[child])
+    assert list(parent.iter_tokens()) == ["{", "1", "}"]
+    assert parent.check_length(0, 80)
+    assert not parent.check_length(0, 2)
+
+
+def test_line_expandable_and_check_length() -> None:
+    child = Node(value_repr="x" * 20, last=True)
+    node = Node(open_brace="{", close_brace="}", children=[child])
+    line = _Line(node=node, text="")
+    assert line.expandable
+    assert line.check_length(80)
+    assert not line.check_length(5)
+
+
+def test_repl_display_hook() -> None:
+    console = Console(file=io.StringIO())
+    from rich.pretty import _repl_display_hook
+
+    _repl_display_hook(
+        {"a": 1},
+        console=console,
+        overflow="ignore",
+        crop=False,
+        indent_guides=False,
+        max_length=None,
+        max_string=None,
+        max_depth=None,
+        expand_all=False,
+    )
+    assert console.file.getvalue()
+
+
 def test_install() -> None:
     console = Console(file=io.StringIO())
     dh = sys.displayhook
-    install(console)
-    sys.displayhook("foo")
-    assert console.file.getvalue() == "'foo'\n"
-    assert sys.displayhook is not dh
+    try:
+        install(console)
+        sys.displayhook("foo")
+        assert console.file.getvalue() == "'foo'\n"
+        assert sys.displayhook is not dh
+    finally:
+        sys.displayhook = dh
 
 
 def test_install_max_depth() -> None:
     console = Console(file=io.StringIO())
     dh = sys.displayhook
-    install(console, max_depth=1)
-    sys.displayhook({"foo": {"bar": True}})
-    assert console.file.getvalue() == "{'foo': {...}}\n"
-    assert sys.displayhook is not dh
+    try:
+        install(console, max_depth=1)
+        sys.displayhook({"foo": {"bar": True}})
+        assert console.file.getvalue() == "{'foo': {...}}\n"
+        assert sys.displayhook is not dh
+    finally:
+        sys.displayhook = dh
+
+
+def test_install_ipython_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import MagicMock
+
+    console = Console(file=io.StringIO())
+    ip = MagicMock()
+    formatters: dict = {}
+    ip.display_formatter.formatters = formatters
+    monkeypatch.setattr(builtins, "get_ipython", lambda: ip, raising=False)
+    try:
+        install(console, max_depth=1, crop=True)
+        assert "text/plain" in formatters
+        assert callable(formatters["text/plain"])
+    finally:
+        monkeypatch.delattr(builtins, "get_ipython", raising=False)
 
 
 def test_ipy_display_hook__repr_html() -> None:
     console = Console(file=io.StringIO(), force_jupyter=True)
 
-    class Thing:
-        def _repr_html_(self):
-            return "hello"
+    Thing = type("Thing", (), {"_repr_html_": lambda self: "hello"})
 
     console.begin_capture()
     _ipy_display_hook(Thing(), console=console)
@@ -84,15 +146,15 @@ def test_ipy_display_hook__multiple_special_reprs() -> None:
     """
     console = Console(file=io.StringIO(), force_jupyter=True)
 
-    class Thing:
-        def __repr__(self):
-            return "A Thing"
-
-        def _repr_latex_(self):
-            return None
-
-        def _repr_html_(self):
-            return "hello"
+    Thing = type(
+        "Thing",
+        (),
+        {
+            "__repr__": lambda self: "A Thing",
+            "_repr_latex_": lambda self: None,
+            "_repr_html_": lambda self: "hello",
+        },
+    )
 
     result = _ipy_display_hook(Thing(), console=console)
     assert result == "A Thing"
@@ -101,9 +163,7 @@ def test_ipy_display_hook__multiple_special_reprs() -> None:
 def test_ipy_display_hook__no_special_repr_methods() -> None:
     console = Console(file=io.StringIO(), force_jupyter=True)
 
-    class Thing:
-        def __repr__(self) -> str:
-            return "hello"
+    Thing = type("Thing", (), {"__repr__": lambda self: "hello"})
 
     result = _ipy_display_hook(Thing(), console=console)
     # should be repr as-is
@@ -117,18 +177,19 @@ def test_ipy_display_hook__special_repr_raises_exception() -> None:
     """
     console = Console(file=io.StringIO(), force_jupyter=True)
 
-    class Thing:
-        def _repr_markdown_(self):
-            raise Exception()
+    def _repr_markdown_raises(_self):
+        raise Exception()
 
-        def _repr_latex_(self):
-            return None
-
-        def _repr_html_(self):
-            return "hello"
-
-        def __repr__(self):
-            return "therepr"
+    Thing = type(
+        "Thing",
+        (),
+        {
+            "_repr_markdown_": _repr_markdown_raises,
+            "_repr_latex_": lambda self: None,
+            "_repr_html_": lambda self: "hello",
+            "__repr__": lambda self: "therepr",
+        },
+    )
 
     result = _ipy_display_hook(Thing(), console=console)
     assert result == "therepr"
@@ -157,18 +218,29 @@ def test_pretty() -> None:
     assert result == expected
 
 
-@dataclass
-class ExampleDataclass:
-    foo: int
-    bar: str
-    ignore: int = field(repr=False)
-    baz: List[str] = field(default_factory=list)
-    last: int = field(default=1, repr=False)
+ExampleDataclass = make_dataclass(
+    "ExampleDataclass",
+    [
+        ("foo", int),
+        ("bar", str),
+        ("ignore", int, field(repr=False, default=0)),
+        ("baz", List[str], field(default_factory=list)),
+        ("last", int, field(default=1, repr=False)),
+    ],
+)
+Empty = make_dataclass("Empty", [])
 
 
-@dataclass
-class Empty:
-    pass
+StockKeepingUnit = NamedTuple(
+    "StockKeepingUnit",
+    [
+        ("name", str),
+        ("description", str),
+        ("price", float),
+        ("category", str),
+        ("reviews", List[str]),
+    ],
+)
 
 
 def test_pretty_dataclass() -> None:
@@ -194,14 +266,6 @@ def test_pretty_dataclass() -> None:
 def test_empty_dataclass() -> None:
     assert pretty_repr(Empty()) == "Empty()"
     assert pretty_repr([Empty()]) == "[Empty()]"
-
-
-class StockKeepingUnit(NamedTuple):
-    name: str
-    description: str
-    price: float
-    category: str
-    reviews: List[str]
 
 
 def test_pretty_namedtuple() -> None:
@@ -242,16 +306,16 @@ def test_pretty_namedtuple_empty() -> None:
 
 
 def test_pretty_namedtuple_custom_repr() -> None:
-    class Thing(NamedTuple):
-        def __repr__(self):
-            return "XX"
+    _Thing = NamedTuple("_Thing", [])
+    Thing = type("Thing", (_Thing,), {"__repr__": lambda self: "XX"})
 
     assert pretty_repr(Thing()) == "XX"
 
 
 def test_pretty_namedtuple_fields_invalid_type() -> None:
-    class LooksLikeANamedTupleButIsnt(tuple):
-        _fields = "blah"
+    LooksLikeANamedTupleButIsnt = type(
+        "LooksLikeANamedTupleButIsnt", (tuple,), {"_fields": "blah"}
+    )
 
     instance = LooksLikeANamedTupleButIsnt()
     result = pretty_repr(instance)
@@ -272,9 +336,7 @@ def test_small_width() -> None:
 
 
 def test_ansi_in_pretty_repr() -> None:
-    class Hello:
-        def __repr__(self):
-            return "Hello \x1b[38;5;239mWorld!"
+    Hello = type("Hello", (), {"__repr__": lambda self: "Hello \x1b[38;5;239mWorld!"})
 
     pretty = Pretty(Hello())
 
@@ -286,9 +348,10 @@ def test_ansi_in_pretty_repr() -> None:
 
 
 def test_broken_repr() -> None:
-    class BrokenRepr:
-        def __repr__(self):
-            1 / 0
+    def _broken_repr(_self):
+        1 / 0
+
+    BrokenRepr = type("BrokenRepr", (), {"__repr__": _broken_repr})
 
     test = [BrokenRepr()]
     result = pretty_repr(test)
@@ -297,12 +360,14 @@ def test_broken_repr() -> None:
 
 
 def test_broken_getattr() -> None:
-    class BrokenAttr:
-        def __getattr__(self, name):
-            1 / 0
+    def _broken_getattr(_self, name):
+        1 / 0
 
-        def __repr__(self):
-            return "BrokenAttr()"
+    BrokenAttr = type(
+        "BrokenAttr",
+        (),
+        {"__getattr__": _broken_getattr, "__repr__": lambda self: "BrokenAttr()"},
+    )
 
     test = BrokenAttr()
     result = pretty_repr(test)
@@ -328,9 +393,7 @@ def test_reference_cycle_container() -> None:
 
 
 def test_reference_cycle_namedtuple() -> None:
-    class Example(NamedTuple):
-        x: int
-        y: Any
+    Example = NamedTuple("Example", [("x", int), ("y", Any)])
 
     test = Example(1, [Example(2, [])])
     test.y[0].y.append(test)
@@ -344,61 +407,48 @@ def test_reference_cycle_namedtuple() -> None:
     assert res == "Example(x=1, y=[Example(x=2, y=None), Example(x=2, y=None)])"
 
 
-def test_reference_cycle_dataclass() -> None:
-    @dataclass
-    class Example:
-        x: int
-        y: Any
-
-    test = Example(1, None)
+def _assert_reference_cycle_examples(example_factory) -> None:
+    test = example_factory(1, None)
     test.y = test
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=...)"
+    assert pretty_repr(test) == "Example(x=1, y=...)"
 
-    test = Example(1, Example(2, None))
+    test = example_factory(1, example_factory(2, None))
     test.y.y = test
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=Example(x=2, y=...))"
+    assert pretty_repr(test) == "Example(x=1, y=Example(x=2, y=...))"
 
-    # Not a cyclic reference, just a repeated reference
-    a = Example(2, None)
-    test = Example(1, [a, a])
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=[Example(x=2, y=None), Example(x=2, y=None)])"
+    a = example_factory(2, None)
+    test = example_factory(1, [a, a])
+    assert pretty_repr(test) == (
+        "Example(x=1, y=[Example(x=2, y=None), Example(x=2, y=None)])"
+    )
+
+
+def test_reference_cycle_dataclass() -> None:
+    Example = make_dataclass("Example", [("x", int), ("y", Any)])
+
+    _assert_reference_cycle_examples(Example)
 
 
 def test_reference_cycle_attrs() -> None:
-    @attr.define
-    class Example:
-        x: int
-        y: Any
+    Example = attr.make_class("Example", {"x": attr.field(), "y": attr.field()})
 
-    test = Example(1, None)
-    test.y = test
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=...)"
-
-    test = Example(1, Example(2, None))
-    test.y.y = test
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=Example(x=2, y=...))"
-
-    # Not a cyclic reference, just a repeated reference
-    a = Example(2, None)
-    test = Example(1, [a, a])
-    res = pretty_repr(test)
-    assert res == "Example(x=1, y=[Example(x=2, y=None), Example(x=2, y=None)])"
+    _assert_reference_cycle_examples(Example)
 
 
 def test_reference_cycle_custom_repr() -> None:
-    class Example:
-        def __init__(self, x, y):
-            self.x = x
-            self.y = y
+    def _example_init(self, x, y):
+        self.x = x
+        self.y = y
 
-        def __rich_repr__(self):
-            yield ("x", self.x)
-            yield ("y", self.y)
+    def _example_rich_repr(self):
+        yield ("x", self.x)
+        yield ("y", self.y)
+
+    Example = type(
+        "Example",
+        (),
+        {"__init__": _example_init, "__rich_repr__": _example_rich_repr},
+    )
 
     test = Example(1, None)
     test.y = test
@@ -440,19 +490,20 @@ def test_max_depth() -> None:
 
 
 def test_max_depth_rich_repr() -> None:
-    class Foo:
-        def __init__(self, foo):
-            self.foo = foo
+    def _foo_init(self, foo):
+        self.foo = foo
 
-        def __rich_repr__(self):
-            yield "foo", self.foo
+    def _foo_rich_repr(self):
+        yield "foo", self.foo
 
-    class Bar:
-        def __init__(self, bar):
-            self.bar = bar
+    def _bar_init(self, bar):
+        self.bar = bar
 
-        def __rich_repr__(self):
-            yield "bar", self.bar
+    def _bar_rich_repr(self):
+        yield "bar", self.bar
+
+    Foo = type("Foo", (), {"__init__": _foo_init, "__rich_repr__": _foo_rich_repr})
+    Bar = type("Bar", (), {"__init__": _bar_init, "__rich_repr__": _bar_rich_repr})
 
     assert (
         pretty_repr(Foo(foo=Bar(bar=Foo(foo=[]))), max_depth=2)
@@ -461,13 +512,8 @@ def test_max_depth_rich_repr() -> None:
 
 
 def test_max_depth_attrs() -> None:
-    @attr.define
-    class Foo:
-        foo = attr.field()
-
-    @attr.define
-    class Bar:
-        bar = attr.field()
+    Foo = attr.make_class("Foo", {"foo": attr.field()})
+    Bar = attr.make_class("Bar", {"bar": attr.field()})
 
     assert (
         pretty_repr(Foo(foo=Bar(bar=Foo(foo=[]))), max_depth=2)
@@ -476,13 +522,8 @@ def test_max_depth_attrs() -> None:
 
 
 def test_max_depth_dataclass() -> None:
-    @dataclass
-    class Foo:
-        foo: object
-
-    @dataclass
-    class Bar:
-        bar: object
+    Foo = make_dataclass("Foo", [("foo", object)])
+    Bar = make_dataclass("Bar", [("bar", object)])
 
     assert (
         pretty_repr(Foo(foo=Bar(bar=Foo(foo=[]))), max_depth=2)
@@ -607,20 +648,21 @@ def test_newline() -> None:
 
 
 def test_empty_repr() -> None:
-    class Foo:
-        def __repr__(self):
-            return ""
+    Foo = type("Foo", (), {"__repr__": lambda self: ""})
 
     assert pretty_repr(Foo()) == ""
 
 
 def test_attrs() -> None:
-    @attr.define
-    class Point:
-        x: int
-        y: int
-        foo: str = attr.field(repr=str.upper)
-        z: int = 0
+    Point = attr.make_class(
+        "Point",
+        {
+            "x": attr.field(),
+            "y": attr.field(),
+            "foo": attr.field(repr=str.upper),
+            "z": attr.field(default=0),
+        },
+    )
 
     result = pretty_repr(Point(1, 2, foo="bar"))
     print(repr(result))
@@ -629,9 +671,7 @@ def test_attrs() -> None:
 
 
 def test_attrs_empty() -> None:
-    @attr.define
-    class Nada:
-        pass
+    Nada = attr.make_class("Nada", {})
 
     result = pretty_repr(Nada())
     print(repr(result))
@@ -645,9 +685,7 @@ def test_attrs_empty() -> None:
 @skip_py313
 @skip_py314
 def test_attrs_broken() -> None:
-    @attr.define
-    class Foo:
-        bar: int
+    Foo = attr.make_class("Foo", {"bar": attr.field()})
 
     foo = Foo(1)
     del foo.bar
@@ -660,9 +698,7 @@ def test_attrs_broken() -> None:
 @skip_py38
 @skip_py39
 def test_attrs_broken_310() -> None:
-    @attr.define
-    class Foo:
-        bar: int
+    Foo = attr.make_class("Foo", {"bar": attr.field()})
 
     foo = Foo(1)
     del foo.bar
@@ -676,12 +712,8 @@ def test_attrs_broken_310() -> None:
 
 
 def test_user_dict() -> None:
-    class D1(UserDict):
-        pass
-
-    class D2(UserDict):
-        def __repr__(self):
-            return "FOO"
+    D1 = type("D1", (UserDict,), {})
+    D2 = type("D2", (UserDict,), {"__repr__": lambda self: "FOO"})
 
     d1 = D1({"foo": "bar"})
     d2 = D2({"foo": "bar"})
@@ -696,9 +728,7 @@ def test_user_dict() -> None:
 def test_lying_attribute() -> None:
     """Test getattr doesn't break rich repr protocol"""
 
-    class Foo:
-        def __getattr__(self, attr):
-            return "foo"
+    Foo = type("Foo", (), {"__getattr__": lambda self, attr: "foo"})
 
     foo = Foo()
     result = pretty_repr(foo)
@@ -720,9 +750,10 @@ def test_tuple_rich_repr() -> None:
     Test that can use None as key to have tuple positional values.
     """
 
-    class Foo:
-        def __rich_repr__(self):
-            yield None, (1,)
+    def _foo_rich_repr(self):
+        yield None, (1,)
+
+    Foo = type("Foo", (), {"__rich_repr__": _foo_rich_repr})
 
     assert pretty_repr(Foo()) == "Foo((1,))"
 
@@ -732,20 +763,21 @@ def test_tuple_rich_repr_default() -> None:
     Test that can use None as key to have tuple positional values and with a default.
     """
 
-    class Foo:
-        def __rich_repr__(self):
-            yield None, (1,), (1,)
+    def _foo_rich_repr(self):
+        yield None, (1,), (1,)
+
+    Foo = type("Foo", (), {"__rich_repr__": _foo_rich_repr})
 
     assert pretty_repr(Foo()) == "Foo()"
 
 
 def test_dataclass_no_attribute() -> None:
     """Regression test for https://github.com/Textualize/rich/issues/3417"""
-    from dataclasses import dataclass, field
-
-    @dataclass(eq=False)
-    class BadDataclass:
-        item: int = field(init=False)
+    BadDataclass = make_dataclass(
+        "BadDataclass",
+        [("item", int, field(init=False))],
+        eq=False,
+    )
 
     # item is not provided
     bad_data_class = BadDataclass()

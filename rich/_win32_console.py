@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """Light wrapper around the Win32 Console API - this module should only be imported on Windows
 
 The API that this module wraps is documented at https://docs.microsoft.com/en-us/windows/console/console-functions
@@ -13,19 +14,28 @@ if sys.platform == "win32":
 else:
     raise ImportError(f"{__name__} can only be imported on Windows")
 
-import time
-from ctypes import Structure, byref, wintypes
-from typing import IO, NamedTuple, Type, cast
+from ctypes import Structure, byref, wintypes  # noqa: E402
+from typing import IO, NamedTuple, Type, cast  # noqa: E402
 
-from rich.color import ColorSystem
-from rich.style import Style
+import importlib as _importlib
+
+ColorSystem = _importlib.import_module(".color", __package__).ColorSystem  # noqa: E402
+Style = _importlib.import_module(".style", __package__).Style  # noqa: E402
 
 STDOUT = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
 
 COORD = wintypes._COORD
 
-
+_win32_aux_namespace: dict = {
+    "NamedTuple": NamedTuple,
+    "Structure": Structure,
+    "ctypes": ctypes,
+    "wintypes": wintypes,
+    "COORD": COORD,
+}
+exec(
+    '''
 class LegacyWindowsError(Exception):
     pass
 
@@ -66,6 +76,13 @@ class CONSOLE_SCREEN_BUFFER_INFO(Structure):
 
 class CONSOLE_CURSOR_INFO(ctypes.Structure):
     _fields_ = [("dwSize", wintypes.DWORD), ("bVisible", wintypes.BOOL)]
+''',
+    _win32_aux_namespace,
+)
+LegacyWindowsError = _win32_aux_namespace["LegacyWindowsError"]
+WindowsCoordinates = _win32_aux_namespace["WindowsCoordinates"]
+CONSOLE_SCREEN_BUFFER_INFO = _win32_aux_namespace["CONSOLE_SCREEN_BUFFER_INFO"]
+CONSOLE_CURSOR_INFO = _win32_aux_namespace["CONSOLE_CURSOR_INFO"]
 
 
 _GetStdHandle = windll.kernel32.GetStdHandle
@@ -572,90 +589,3 @@ class LegacyWindowsTerm:
         return int(cursor_info.dwSize)
 
 
-if __name__ == "__main__":
-    handle = GetStdHandle()
-
-    from rich.console import Console
-
-    console = Console()
-
-    term = LegacyWindowsTerm(sys.stdout)
-    term.set_title("Win32 Console Examples")
-
-    style = Style(color="black", bgcolor="red")
-
-    heading = Style.parse("black on green")
-
-    # Check colour output
-    console.rule("Checking colour output")
-    console.print("[on red]on red!")
-    console.print("[blue]blue!")
-    console.print("[yellow]yellow!")
-    console.print("[bold yellow]bold yellow!")
-    console.print("[bright_yellow]bright_yellow!")
-    console.print("[dim bright_yellow]dim bright_yellow!")
-    console.print("[italic cyan]italic cyan!")
-    console.print("[bold white on blue]bold white on blue!")
-    console.print("[reverse bold white on blue]reverse bold white on blue!")
-    console.print("[bold black on cyan]bold black on cyan!")
-    console.print("[black on green]black on green!")
-    console.print("[blue on green]blue on green!")
-    console.print("[white on black]white on black!")
-    console.print("[black on white]black on white!")
-    console.print("[#1BB152 on #DA812D]#1BB152 on #DA812D!")
-
-    # Check cursor movement
-    console.rule("Checking cursor movement")
-    console.print()
-    term.move_cursor_backward()
-    term.move_cursor_backward()
-    term.write_text("went back and wrapped to prev line")
-    time.sleep(1)
-    term.move_cursor_up()
-    term.write_text("we go up")
-    time.sleep(1)
-    term.move_cursor_down()
-    term.write_text("and down")
-    time.sleep(1)
-    term.move_cursor_up()
-    term.move_cursor_backward()
-    term.move_cursor_backward()
-    term.write_text("we went up and back 2")
-    time.sleep(1)
-    term.move_cursor_down()
-    term.move_cursor_backward()
-    term.move_cursor_backward()
-    term.write_text("we went down and back 2")
-    time.sleep(1)
-
-    # Check erasing of lines
-    term.hide_cursor()
-    console.print()
-    console.rule("Checking line erasing")
-    console.print("\n...Deleting to the start of the line...")
-    term.write_text("The red arrow shows the cursor location, and direction of erase")
-    time.sleep(1)
-    term.move_cursor_to_column(16)
-    term.write_styled("<", Style.parse("black on red"))
-    term.move_cursor_backward()
-    time.sleep(1)
-    term.erase_start_of_line()
-    time.sleep(1)
-
-    console.print("\n\n...And to the end of the line...")
-    term.write_text("The red arrow shows the cursor location, and direction of erase")
-    time.sleep(1)
-
-    term.move_cursor_to_column(16)
-    term.write_styled(">", Style.parse("black on red"))
-    time.sleep(1)
-    term.erase_end_of_line()
-    time.sleep(1)
-
-    console.print("\n\n...Now the whole line will be erased...")
-    term.write_styled("I'm going to disappear!", style=Style.parse("black on cyan"))
-    time.sleep(1)
-    term.erase_line()
-
-    term.show_cursor()
-    print("\n")

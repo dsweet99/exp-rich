@@ -1,5 +1,5 @@
 from rich import print
-from rich.console import Group
+from rich._console_entry import Group
 from rich.panel import Panel
 
 panel_group = Group(

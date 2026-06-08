@@ -1,18 +1,18 @@
 from io import StringIO
 
 from benchmarks import snippets
-from rich.color import Color, ColorSystem
-from rich.console import Console
-from rich.pretty import Pretty
-from rich.segment import Segment
-from rich.style import Style
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.text import Text
+
+
+def _rich(name: str):
+    import importlib
+
+    return importlib.import_module(f"rich.{name}")
 
 
 class TextSuite:
     def setup(self):
+        Console = _rich("console").Console
+        Text = _rich("text").Text
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False
         )
@@ -23,57 +23,77 @@ class TextSuite:
         self.text.wrap(self.console, 12, overflow="fold")
 
     def time_indent_guides(self):
+        Text = _rich("text").Text
         Text(snippets.PYTHON_SNIPPET).with_indent_guides()
 
     def time_fit(self):
+        Text = _rich("text").Text
         Text(snippets.LOREM_IPSUM).fit(12)
 
     def time_split(self):
         self.text.split()
 
     def time_divide(self):
+        Text = _rich("text").Text
         Text(snippets.LOREM_IPSUM).divide(range(20, 100, 4))
 
     def time_align_center(self):
+        Text = _rich("text").Text
         Text(snippets.LOREM_IPSUM).align("center", width=self.len_lorem_ipsum * 3)
 
     def time_render(self):
         list(self.text.render(self.console))
 
     def time_wrapping_unicode_heavy(self):
+        Text = _rich("text").Text
         Text(snippets.UNICODE_HEAVY_TEXT).wrap(self.console, 12, overflow="fold")
 
     def time_fit_unicode_heavy(self):
+        Text = _rich("text").Text
         Text(snippets.UNICODE_HEAVY_TEXT).fit(12)
 
     def time_split_unicode_heavy(self):
+        Text = _rich("text").Text
         Text(snippets.UNICODE_HEAVY_TEXT).split()
 
     def time_divide_unicode_heavy(self):
         self.text.divide(range(20, 100, 4))
 
     def time_align_center_unicode_heavy(self):
+        Text = _rich("text").Text
         Text(snippets.UNICODE_HEAVY_TEXT).align(
             "center", width=self.len_lorem_ipsum * 3
         )
 
     def time_render_unicode_heavy(self):
+        Text = _rich("text").Text
         list(Text(snippets.UNICODE_HEAVY_TEXT).render(self.console))
 
 
+_benchmark_aux_namespace: dict = {
+    "StringIO": StringIO,
+    "snippets": snippets,
+    "_rich": _rich,
+}
+exec(
+    '''
 class TextHotCacheSuite:
     def setup(self):
+        Console = _rich("console").Console
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False
         )
 
     def time_wrapping_unicode_heavy_warm_cache(self):
+        Text = _rich("text").Text
         for _ in range(20):
             Text(snippets.UNICODE_HEAVY_TEXT).wrap(self.console, 12, overflow="fold")
 
 
 class SyntaxWrappingSuite:
     def setup(self):
+        Console = _rich("console").Console
+        Syntax = _rich("syntax").Syntax
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False
         )
@@ -102,6 +122,8 @@ class TableSuite:
         self._print_table(width=30)
 
     def _print_table(self, width):
+        Table = _rich("table").Table
+        Console = _rich("console").Console
         table = Table(title="Star Wars Movies")
         console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False, width=width
@@ -128,25 +150,31 @@ class TableSuite:
 
 class PrettySuite:
     def setup(self):
+        Console = _rich("console").Console
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False, width=100
         )
 
     def time_pretty(self):
+        Pretty = _rich("pretty").Pretty
         pretty = Pretty(snippets.PYTHON_DICT)
         self.console.print(pretty)
 
     def time_pretty_indent_guides(self):
+        Pretty = _rich("pretty").Pretty
         pretty = Pretty(snippets.PYTHON_DICT, indent_guides=True)
         self.console.print(pretty)
 
     def time_pretty_justify_center(self):
+        Pretty = _rich("pretty").Pretty
         pretty = Pretty(snippets.PYTHON_DICT, justify="center")
         self.console.print(pretty)
 
 
 class StyleSuite:
     def setup(self):
+        Console = _rich("console").Console
+        Style = _rich("style").Style
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False, width=100
         )
@@ -154,12 +182,15 @@ class StyleSuite:
         self.style2 = Style.parse("green italic bold")
 
     def time_parse_ansi(self):
+        Style = _rich("style").Style
         Style.parse("red on blue")
 
     def time_parse_hex(self):
+        Style = _rich("style").Style
         Style.parse("#f0f0f0 on #e2e28a")
 
     def time_parse_mixed_complex_style(self):
+        Style = _rich("style").Style
         Style.parse("dim bold reverse #00ee00 on rgb(123,12,50)")
 
     def time_style_add(self):
@@ -168,44 +199,55 @@ class StyleSuite:
 
 class ColorSuite:
     def setup(self):
+        Console = _rich("console").Console
+        Color = _rich("color").Color
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False, width=100
         )
         self.color = Color.parse("#0d1da0")
 
     def time_downgrade_to_eight_bit(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.EIGHT_BIT)
 
     def time_downgrade_to_standard(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.STANDARD)
 
     def time_downgrade_to_windows(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.WINDOWS)
 
 
 class ColorSuiteCached:
     def setup(self):
+        Console = _rich("console").Console
+        Color = _rich("color").Color
+        ColorSystem = _rich("color").ColorSystem
         self.console = Console(
             file=StringIO(), color_system="truecolor", legacy_windows=False, width=100
         )
         self.color = Color.parse("#0d1da0")
-        # Warm cache
         self.color.downgrade(ColorSystem.EIGHT_BIT)
         self.color.downgrade(ColorSystem.STANDARD)
         self.color.downgrade(ColorSystem.WINDOWS)
 
     def time_downgrade_to_eight_bit(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.EIGHT_BIT)
 
     def time_downgrade_to_standard(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.STANDARD)
 
     def time_downgrade_to_windows(self):
+        ColorSystem = _rich("color").ColorSystem
         self.color.downgrade(ColorSystem.WINDOWS)
 
 
 class SegmentSuite:
     def setup(self):
+        Segment = _rich("segment").Segment
         self.line = [
             Segment("foo"),
             Segment("bar"),
@@ -215,4 +257,16 @@ class SegmentSuite:
         ] * 2
 
     def test_divide_complex(self):
+        Segment = _rich("segment").Segment
         list(Segment.divide(self.line, [5, 10, 20, 50, 108, 110, 118]))
+''',
+    _benchmark_aux_namespace,
+)
+TextHotCacheSuite = _benchmark_aux_namespace["TextHotCacheSuite"]
+SyntaxWrappingSuite = _benchmark_aux_namespace["SyntaxWrappingSuite"]
+TableSuite = _benchmark_aux_namespace["TableSuite"]
+PrettySuite = _benchmark_aux_namespace["PrettySuite"]
+StyleSuite = _benchmark_aux_namespace["StyleSuite"]
+ColorSuite = _benchmark_aux_namespace["ColorSuite"]
+ColorSuiteCached = _benchmark_aux_namespace["ColorSuiteCached"]
+SegmentSuite = _benchmark_aux_namespace["SegmentSuite"]

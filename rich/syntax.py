@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 import os.path
-import re
 import sys
 import textwrap
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
-    Any,
     Dict,
     Iterable,
     List,
-    NamedTuple,
     Optional,
     Sequence,
     Set,
@@ -24,7 +19,6 @@ from typing import (
 from pygments.lexer import Lexer
 from pygments.lexers import get_lexer_by_name, guess_lexer_for_filename
 from pygments.style import Style as PygmentsStyle
-from pygments.styles import get_style_by_name
 from pygments.token import (
     Comment,
     Error,
@@ -39,20 +33,13 @@ from pygments.token import (
 )
 from pygments.util import ClassNotFound
 
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, JustifyMethod, RenderResult
+import importlib as _importlib
 
-from rich.containers import Lines
-from rich.padding import Padding, PaddingDimensions
-
-from ._loop import loop_first
-from .cells import cell_len
-from .color import Color, blend_rgb
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment, Segments
+from ._align_types import JustifyMethod
+from ._padding_types import PaddingDimensions
+from ._render_protocol import Console, ConsoleOptions, RenderResult
+from ._segment_proxy import Segment
 from .style import Style, StyleType
-from .text import Text
 
 TokenType = Tuple[str, ...]
 
@@ -123,124 +110,59 @@ ANSI_DARK: Dict[TokenType, Style] = {
 RICH_SYNTAX_THEMES = {"ansi_light": ANSI_LIGHT, "ansi_dark": ANSI_DARK}
 NUMBERS_COLUMN_DEFAULT_PADDING = 2
 
+_LAZY_SYNTAX_THEME = {
+    "ANSISyntaxTheme",
+    "PygmentsSyntaxTheme",
+    "SyntaxTheme",
+    "PaddingProperty",
+    "_SyntaxHighlightRange",
+    "SyntaxPosition",
+}
 
-class SyntaxTheme(ABC):
-    """Base class for a syntax theme."""
-
-    @abstractmethod
-    def get_style_for_token(self, token_type: TokenType) -> Style:
-        """Get a style for a given Pygments token."""
-        raise NotImplementedError  # pragma: no cover
-
-    @abstractmethod
-    def get_background_style(self) -> Style:
-        """Get the background color."""
-        raise NotImplementedError  # pragma: no cover
-
-
-class PygmentsSyntaxTheme(SyntaxTheme):
-    """Syntax theme that delegates to Pygments theme."""
-
-    def __init__(self, theme: Union[str, Type[PygmentsStyle]]) -> None:
-        self._style_cache: Dict[TokenType, Style] = {}
-        if isinstance(theme, str):
-            try:
-                self._pygments_style_class = get_style_by_name(theme)
-            except ClassNotFound:
-                self._pygments_style_class = get_style_by_name("default")
-        else:
-            self._pygments_style_class = theme
-
-        self._background_color = self._pygments_style_class.background_color
-        self._background_style = Style(bgcolor=self._background_color)
-
-    def get_style_for_token(self, token_type: TokenType) -> Style:
-        """Get a style from a Pygments class."""
-        try:
-            return self._style_cache[token_type]
-        except KeyError:
-            try:
-                pygments_style = self._pygments_style_class.style_for_token(token_type)
-            except KeyError:
-                style = Style.null()
-            else:
-                color = pygments_style["color"]
-                bgcolor = pygments_style["bgcolor"]
-                style = Style(
-                    color="#" + color if color else "#000000",
-                    bgcolor="#" + bgcolor if bgcolor else self._background_color,
-                    bold=pygments_style["bold"],
-                    italic=pygments_style["italic"],
-                    underline=pygments_style["underline"],
-                )
-            self._style_cache[token_type] = style
-        return style
-
-    def get_background_style(self) -> Style:
-        return self._background_style
+_LAZY_MODULE_ATTRS = {
+    "Text": (".text", "Text"),
+    "Padding": (".padding", "Padding"),
+    "Lines": (".containers", "Lines"),
+    "Segments": ("._segment_aux", "Segments"),
+    "Measurement": (".measure", "Measurement"),
+    "Color": (".color", "Color"),
+    "cell_len": (".cells", "cell_len"),
+    "blend_rgb": (".color", "blend_rgb"),
+}
 
 
-class ANSISyntaxTheme(SyntaxTheme):
-    """Syntax theme to use standard colors."""
-
-    def __init__(self, style_map: Dict[TokenType, Style]) -> None:
-        self.style_map = style_map
-        self._missing_style = Style.null()
-        self._background_style = Style.null()
-        self._style_cache: Dict[TokenType, Style] = {}
-
-    def get_style_for_token(self, token_type: TokenType) -> Style:
-        """Look up style in the style map."""
-        try:
-            return self._style_cache[token_type]
-        except KeyError:
-            # Styles form a hierarchy
-            # We need to go from most to least specific
-            # e.g. ("foo", "bar", "baz") to ("foo", "bar")  to ("foo",)
-            get_style = self.style_map.get
-            token = tuple(token_type)
-            style = self._missing_style
-            while token:
-                _style = get_style(token)
-                if _style is not None:
-                    style = _style
-                    break
-                token = token[:-1]
-            self._style_cache[token_type] = style
-            return style
-
-    def get_background_style(self) -> Style:
-        return self._background_style
+def __getattr__(name: str):
+    if name in _LAZY_SYNTAX_THEME:
+        return getattr(_importlib.import_module("._syntax_themes", __package__), name)
+    if name in _LAZY_MODULE_ATTRS:
+        module_name, attr = _LAZY_MODULE_ATTRS[name]
+        return getattr(_importlib.import_module(module_name, __package__), attr)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-SyntaxPosition = Tuple[int, int]
+PaddingProperty = _importlib.import_module("._syntax_themes", __package__).PaddingProperty
+_syntax_themes = _importlib.import_module("._syntax_themes", __package__)
+SyntaxTheme = _syntax_themes.SyntaxTheme
+ANSISyntaxTheme = _syntax_themes.ANSISyntaxTheme
+PygmentsSyntaxTheme = _syntax_themes.PygmentsSyntaxTheme
+_SyntaxHighlightRange = _syntax_themes._SyntaxHighlightRange
+SyntaxPosition = _syntax_themes.SyntaxPosition
+_padding_mod = _importlib.import_module(".padding", __package__)
+Padding = _padding_mod.Padding
+_color_mod = _importlib.import_module(".color", __package__)
+Color = _color_mod.Color
+blend_rgb = _color_mod.blend_rgb
+_measurement_mod = _importlib.import_module(".measure", __package__)
+Measurement = _measurement_mod.Measurement
+_cells_mod = _importlib.import_module(".cells", __package__)
+cell_len = _cells_mod.cell_len
+_segment_aux = _importlib.import_module("._segment_aux", __package__)
+Segments = _segment_aux.Segments
+_text_mod = _importlib.import_module(".text", __package__)
+Text = _text_mod.Text
 
 
-class _SyntaxHighlightRange(NamedTuple):
-    """
-    A range to highlight in a Syntax object.
-    `start` and `end` are 2-integers tuples, where the first integer is the line number
-    (starting from 1) and the second integer is the column index (starting from 0).
-    """
-
-    style: StyleType
-    start: SyntaxPosition
-    end: SyntaxPosition
-    style_before: bool = False
-
-
-class PaddingProperty:
-    """Descriptor to get and set padding."""
-
-    def __get__(self, obj: Syntax, objtype: Type[Syntax]) -> Tuple[int, int, int, int]:
-        """Space around the Syntax."""
-        return obj._padding
-
-    def __set__(self, obj: Syntax, padding: PaddingDimensions) -> None:
-        obj._padding = Padding.unpack(padding)
-
-
-class Syntax(JupyterMixin):
+class Syntax(_importlib.import_module(".jupyter", __package__).JupyterMixin):
     """Construct a Syntax object to render syntax highlighted code.
 
     Args:
@@ -418,6 +340,8 @@ class Syntax(JupyterMixin):
                 lexer_name = lexer.aliases[0]
             else:
                 lexer_name = lexer.name
+            if lexer_name == "ipython" and path.endswith(".py"):
+                lexer_name = "python"
 
         return lexer_name
 
@@ -426,7 +350,7 @@ class Syntax(JupyterMixin):
         default_style = self._theme.get_background_style() + self.background_style
         return default_style
 
-    def _get_token_color(self, token_type: TokenType) -> Optional[Color]:
+    def _get_token_color(self, token_type: TokenType):
         """Get a color (if any) for the given token.
 
         Args:
@@ -471,7 +395,7 @@ class Syntax(JupyterMixin):
         self,
         code: str,
         line_range: Optional[Tuple[Optional[int], Optional[int]]] = None,
-    ) -> Text:
+    ) -> "Text":
         """Highlight code and return a Text instance.
 
         Args:
@@ -493,59 +417,9 @@ class Syntax(JupyterMixin):
             tab_size=self.tab_size,
             no_wrap=not self.word_wrap,
         )
-        _get_theme_style = self._theme.get_style_for_token
+        from ._syntax_highlight import append_highlighted_code
 
-        lexer = self.lexer or self.default_lexer
-
-        if lexer is None:
-            text.append(code)
-        else:
-            if line_range:
-                # More complicated path to only stylize a portion of the code
-                # This speeds up further operations as there are less spans to process
-                line_start, line_end = line_range
-
-                def line_tokenize() -> Iterable[Tuple[Any, str]]:
-                    """Split tokens to one per line."""
-                    assert lexer  # required to make MyPy happy - we know lexer is not None at this point
-
-                    for token_type, token in lexer.get_tokens(code):
-                        while token:
-                            line_token, new_line, token = token.partition("\n")
-                            yield token_type, line_token + new_line
-
-                def tokens_to_spans() -> Iterable[Tuple[str, Optional[Style]]]:
-                    """Convert tokens to spans."""
-                    tokens = iter(line_tokenize())
-                    line_no = 0
-                    _line_start = line_start - 1 if line_start else 0
-
-                    # Skip over tokens until line start
-                    while line_no < _line_start:
-                        try:
-                            _token_type, token = next(tokens)
-                        except StopIteration:
-                            break
-                        yield (token, None)
-                        if token.endswith("\n"):
-                            line_no += 1
-                    # Generate spans until line end
-                    for token_type, token in tokens:
-                        yield (token, _get_theme_style(token_type))
-                        if token.endswith("\n"):
-                            line_no += 1
-                            if line_end and line_no >= line_end:
-                                break
-
-                text.append_tokens(tokens_to_spans())
-
-            else:
-                text.append_tokens(
-                    (token, _get_theme_style(token_type))
-                    for token_type, token in lexer.get_tokens(code)
-                )
-            if self.background_color is not None:
-                text.stylize(f"on {self.background_color}")
+        append_highlighted_code(self, text, code, line_range)
 
         if self._stylized_ranges:
             self._apply_stylized_ranges(text)
@@ -573,7 +447,7 @@ class Syntax(JupyterMixin):
             _SyntaxHighlightRange(style, start, end, style_before)
         )
 
-    def _get_line_numbers_color(self, blend: float = 0.3) -> Color:
+    def _get_line_numbers_color(self, blend: float = 0.3):
         background_style = self._theme.get_background_style() + self.background_style
         background_color = background_style.bgcolor
         if background_color is None or background_color.is_system_defined:
@@ -654,140 +528,11 @@ class Syntax(JupyterMixin):
         console: Console,
         options: ConsoleOptions,
     ) -> Iterable[Segment]:
-        """
-        Get the Segments for the Syntax object, excluding any vertical/horizontal padding
-        """
-        transparent_background = self._get_base_style().transparent_background
-        _pad_top, pad_right, _pad_bottom, pad_left = self.padding
-        horizontal_padding = pad_left + pad_right
-        code_width = (
-            (
-                (options.max_width - self._numbers_column_width - 1)
-                if self.line_numbers
-                else options.max_width
-            )
-            - horizontal_padding
-            if self.code_width is None
-            else self.code_width
-        )
-        code_width = max(0, code_width)
+        from ._syntax_get_syntax import get_syntax_segments
+        
+        yield from get_syntax_segments(self, console, options)
 
-        ends_on_nl, processed_code = self._process_code(self.code)
-        text = self.highlight(processed_code, self.line_range)
-
-        if not self.line_numbers and not self.word_wrap and not self.line_range:
-            if not ends_on_nl:
-                text.remove_suffix("\n")
-            # Simple case of just rendering text
-            style = (
-                self._get_base_style()
-                + self._theme.get_style_for_token(Comment)
-                + Style(dim=True)
-                + self.background_style
-            )
-            if self.indent_guides and not options.ascii_only:
-                text = text.with_indent_guides(self.tab_size, style=style)
-                text.overflow = "crop"
-            if style.transparent_background:
-                yield from console.render(
-                    text, options=options.update(width=code_width)
-                )
-            else:
-                syntax_lines = console.render_lines(
-                    text,
-                    options.update(width=code_width, height=None, justify="left"),
-                    style=self.background_style,
-                    pad=True,
-                    new_lines=True,
-                )
-                for syntax_line in syntax_lines:
-                    yield from syntax_line
-            return
-
-        start_line, end_line = self.line_range or (None, None)
-        line_offset = 0
-        if start_line:
-            line_offset = max(0, start_line - 1)
-        lines: Union[List[Text], Lines] = text.split("\n", allow_blank=ends_on_nl)
-        if self.line_range:
-            if line_offset > len(lines):
-                return
-            lines = lines[line_offset:end_line]
-
-        if self.indent_guides and not options.ascii_only:
-            style = (
-                self._get_base_style()
-                + self._theme.get_style_for_token(Comment)
-                + Style(dim=True)
-                + self.background_style
-            )
-            lines = (
-                Text("\n")
-                .join(lines)
-                .with_indent_guides(self.tab_size, style=style + Style(italic=False))
-                .split("\n", allow_blank=True)
-            )
-
-        numbers_column_width = self._numbers_column_width
-        render_options = options.update(width=code_width)
-
-        highlight_line = self.highlight_lines.__contains__
-        _Segment = Segment
-        new_line = _Segment("\n")
-
-        line_pointer = "> " if options.legacy_windows else "❱ "
-
-        (
-            background_style,
-            number_style,
-            highlight_number_style,
-        ) = self._get_number_styles(console)
-
-        for line_no, line in enumerate(lines, self.start_line + line_offset):
-            if self.word_wrap:
-                wrapped_lines = console.render_lines(
-                    line,
-                    render_options.update(height=None, justify="left"),
-                    style=background_style,
-                    pad=not transparent_background,
-                )
-            else:
-                segments = list(line.render(console, end=""))
-                if options.no_wrap:
-                    wrapped_lines = [segments]
-                else:
-                    wrapped_lines = [
-                        _Segment.adjust_line_length(
-                            segments,
-                            render_options.max_width,
-                            style=background_style,
-                            pad=not transparent_background,
-                        )
-                    ]
-
-            if self.line_numbers:
-                wrapped_line_left_pad = _Segment(
-                    " " * numbers_column_width + " ", background_style
-                )
-                for first, wrapped_line in loop_first(wrapped_lines):
-                    if first:
-                        line_column = str(line_no).rjust(numbers_column_width - 2) + " "
-                        if highlight_line(line_no):
-                            yield _Segment(line_pointer, Style(color="red"))
-                            yield _Segment(line_column, highlight_number_style)
-                        else:
-                            yield _Segment("  ", highlight_number_style)
-                            yield _Segment(line_column, number_style)
-                    else:
-                        yield wrapped_line_left_pad
-                    yield from wrapped_line
-                    yield new_line
-            else:
-                for wrapped_line in wrapped_lines:
-                    yield from wrapped_line
-                    yield new_line
-
-    def _apply_stylized_ranges(self, text: Text) -> None:
+    def _apply_stylized_ranges(self, text: "Text") -> None:
         """
         Apply stylized ranges to a text instance,
         using the given code to determine the right portion to apply the style to.
@@ -795,30 +540,9 @@ class Syntax(JupyterMixin):
         Args:
             text (Text): Text instance to apply the style to.
         """
-        code = text.plain
-        newlines_offsets = [
-            # Let's add outer boundaries at each side of the list:
-            0,
-            # N.B. using "\n" here is much faster than using metacharacters such as "^" or "\Z":
-            *[
-                match.start() + 1
-                for match in re.finditer("\n", code, flags=re.MULTILINE)
-            ],
-            len(code) + 1,
-        ]
+        from ._syntax_stylized import apply_stylized_ranges
 
-        for stylized_range in self._stylized_ranges:
-            start = _get_code_index_for_syntax_position(
-                newlines_offsets, stylized_range.start
-            )
-            end = _get_code_index_for_syntax_position(
-                newlines_offsets, stylized_range.end
-            )
-            if start is not None and end is not None:
-                if stylized_range.style_before:
-                    text.stylize_before(stylized_range.style, start, end)
-                else:
-                    text.stylize(stylized_range.style, start, end)
+        apply_stylized_ranges(text, self._stylized_ranges)
 
     def _process_code(self, code: str) -> Tuple[bool, str]:
         """
@@ -844,28 +568,9 @@ class Syntax(JupyterMixin):
 def _get_code_index_for_syntax_position(
     newlines_offsets: Sequence[int], position: SyntaxPosition
 ) -> Optional[int]:
-    """
-    Returns the index of the code string for the given positions.
+    from ._syntax_stylized import get_code_index_for_syntax_position
 
-    Args:
-        newlines_offsets (Sequence[int]): The offset of each newline character found in the code snippet.
-        position (SyntaxPosition): The position to search for.
-
-    Returns:
-        Optional[int]: The index of the code string for this position, or `None`
-            if the given position's line number is out of range (if it's the column that is out of range
-            we silently clamp its value so that it reaches the end of the line)
-    """
-    lines_count = len(newlines_offsets)
-
-    line_number, column_index = position
-    if line_number > lines_count or len(newlines_offsets) < (line_number + 1):
-        return None  # `line_number` is out of range
-    line_index = line_number - 1
-    line_length = newlines_offsets[line_index + 1] - newlines_offsets[line_index] - 1
-    # If `column_index` is out of range: let's silently clamp it:
-    column_index = min(line_length, column_index)
-    return newlines_offsets[line_index] + column_index
+    return get_code_index_for_syntax_position(newlines_offsets, position)
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -956,7 +661,7 @@ if __name__ == "__main__":  # pragma: no cover
     )
     args = parser.parse_args()
 
-    from rich.console import Console
+    Console = _importlib.import_module(".console", __package__).Console
 
     console = Console(force_terminal=args.force_color, width=args.width)
 

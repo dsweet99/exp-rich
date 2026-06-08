@@ -1,14 +1,15 @@
 """Lite simulation of the top linux command."""
 import datetime
+import importlib as _importlib
 import random
 import time
 from dataclasses import dataclass
-
-from rich import box
-from rich.console import Console
-from rich.live import Live
-from rich.table import Table
 from typing import Literal
+
+box = _importlib.import_module("rich.box")
+Console = _importlib.import_module("rich._console_entry").Console
+Live = _importlib.import_module("rich.live").Live
+Table = _importlib.import_module("rich.table").Table
 
 
 @dataclass
@@ -73,7 +74,8 @@ def create_process_table(height: int) -> Table:
 
 console = Console()
 
-with Live(console=console, screen=True, auto_refresh=False) as live:
-    while True:
-        live.update(create_process_table(console.size.height - 4), refresh=True)
-        time.sleep(1)
+if __name__ == "__main__":
+    with Live(console=console, screen=True, auto_refresh=False) as live:
+        while True:
+            live.update(create_process_table(console.size.height - 4), refresh=True)
+            time.sleep(1)

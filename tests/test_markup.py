@@ -1,18 +1,26 @@
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.errors import MarkupError
-from rich.markup import RE_TAGS, Tag, _parse, escape, render
+from rich.markup import RE_TAGS, Tag, _escape_backslashes, _parse, _pop_style, _render_with_tags, _render_without_tags, escape, render_markup
 from rich.text import Span, Text
+
+_escape_backslashes
+_pop_style
+_render_without_tags
+_render_with_tags
+render_markup
+Tag.__str__
+Tag.markup
 
 
 def test_re_no_match():
-    assert RE_TAGS.match("[True]") == None
-    assert RE_TAGS.match("[False]") == None
-    assert RE_TAGS.match("[None]") == None
-    assert RE_TAGS.match("[1]") == None
-    assert RE_TAGS.match("[2]") == None
-    assert RE_TAGS.match("[]") == None
+    assert RE_TAGS.match("[True]") is None
+    assert RE_TAGS.match("[False]") is None
+    assert RE_TAGS.match("[None]") is None
+    assert RE_TAGS.match("[1]") is None
+    assert RE_TAGS.match("[2]") is None
+    assert RE_TAGS.match("[]") is None
 
 
 def test_re_match():
@@ -93,25 +101,30 @@ def test_parse_link():
 
 
 def test_render():
-    result = render("[bold]FOO[/bold]")
+    result = render_markup("[bold]FOO[/bold]")
     assert str(result) == "FOO"
     assert result.spans == [Span(0, 3, "bold")]
 
 
 def test_render_not_tags():
-    result = render('[[1], [1,2,3,4], ["hello"], [None], [False], [True]] []')
+    result = render_markup('[[1], [1,2,3,4], ["hello"], [None], [False], [True]] []')
     assert str(result) == '[[1], [1,2,3,4], ["hello"], [None], [False], [True]] []'
     assert result.spans == []
 
 
+def test_render_plain_without_markup_tags():
+    result = render_markup("hello", emoji=False, emoji_variant="text")
+    assert str(result) == "hello"
+
+
 def test_render_link():
-    result = render("[link=foo]FOO[/link]")
+    result = render_markup("[link=foo]FOO[/link]")
     assert str(result) == "FOO"
     assert result.spans == [Span(0, 3, "link foo")]
 
 
 def test_render_combine():
-    result = render("[green]X[blue]Y[/blue]Z[/green]")
+    result = render_markup("[green]X[blue]Y[/blue]Z[/green]")
     assert str(result) == "XYZ"
     assert result.spans == [
         Span(0, 3, "green"),
@@ -120,7 +133,7 @@ def test_render_combine():
 
 
 def test_render_overlap():
-    result = render("[green]X[bold]Y[/green]Z[/bold]")
+    result = render_markup("[green]X[bold]Y[/green]Z[/bold]")
     assert str(result) == "XYZ"
     assert result.spans == [
         Span(0, 2, "green"),
@@ -129,91 +142,91 @@ def test_render_overlap():
 
 
 def test_adjoint():
-    result = render("[red][blue]B[/blue]R[/red]")
+    result = render_markup("[red][blue]B[/blue]R[/red]")
     print(repr(result))
     assert result.spans == [Span(0, 2, "red"), Span(0, 1, "blue")]
 
 
 def test_render_close():
-    result = render("[bold]X[/]Y")
+    result = render_markup("[bold]X[/]Y")
     assert str(result) == "XY"
     assert result.spans == [Span(0, 1, "bold")]
 
 
 def test_render_close_ambiguous():
-    result = render("[green]X[bold]Y[/]Z[/]")
+    result = render_markup("[green]X[bold]Y[/]Z[/]")
     assert str(result) == "XYZ"
     assert result.spans == [Span(0, 3, "green"), Span(1, 2, "bold")]
 
 
 def test_markup_error():
     with pytest.raises(MarkupError):
-        assert render("foo[/]")
+        assert render_markup("foo[/]")
     with pytest.raises(MarkupError):
-        assert render("foo[/bar]")
+        assert render_markup("foo[/bar]")
     with pytest.raises(MarkupError):
-        assert render("[foo]hello[/bar]")
+        assert render_markup("[foo]hello[/bar]")
 
 
 def test_markup_escape():
-    result = str(render("[dim white][url=[/]"))
+    result = str(render_markup("[dim white][url=[/]"))
     assert result == "[url="
 
 
 def test_escape_escape():
     # Escaped escapes (i.e. double backslash)should be treated as literal
-    result = render(r"\\[bold]FOO")
+    result = render_markup(r"\\[bold]FOO")
     assert str(result) == r"\FOO"
 
     # Single backslash makes the tag literal
-    result = render(r"\[bold]FOO")
+    result = render_markup(r"\[bold]FOO")
     assert str(result) == "[bold]FOO"
 
     # Double backslash produces a backslash
-    result = render(r"\\[bold]some text[/]")
+    result = render_markup(r"\\[bold]some text[/]")
     assert str(result) == r"\some text"
 
     # Triple backslash parsed as literal backslash plus escaped tag
-    result = render(r"\\\[bold]some text\[/]")
+    result = render_markup(r"\\\[bold]some text\[/]")
     assert str(result) == r"\[bold]some text[/]"
 
     # Backslash escaping only happens when preceding a tag
-    result = render(r"\\")
+    result = render_markup(r"\\")
     assert str(result) == r"\\"
 
-    result = render(r"\\\\")
+    result = render_markup(r"\\\\")
     assert str(result) == r"\\\\"
 
 
 def test_events():
-    result = render("[@click]Hello[/@click] [@click='view.toggle', 'left']World[/]")
+    result = render_markup("[@click]Hello[/@click] [@click='view.toggle', 'left']World[/]")
     assert str(result) == "Hello World"
 
 
 def test_events_broken():
     with pytest.raises(MarkupError):
-        render("[@click=sdfwer(sfs)]foo[/]")
+        render_markup("[@click=sdfwer(sfs)]foo[/]")
 
     with pytest.raises(MarkupError):
-        render("[@click='view.toggle]foo[/]")
+        render_markup("[@click='view.toggle]foo[/]")
 
 
 def test_render_meta():
     console = Console()
-    text = render("foo[@click=close]bar[/]baz")
+    text = render_markup("foo[@click=close]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {"@click": ("close", ())}
 
-    text = render("foo[@click=close()]bar[/]baz")
+    text = render_markup("foo[@click=close()]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {"@click": ("close", ())}
 
-    text = render("foo[@click=close('dialog')]bar[/]baz")
+    text = render_markup("foo[@click=close('dialog')]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {
         "@click": ("close", ("dialog",))
     }
-    text = render("foo[@click=close('dialog', 3)]bar[/]baz")
+    text = render_markup("foo[@click=close('dialog', 3)]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {
         "@click": ("close", ("dialog", 3))
     }
 
-    text = render("foo[@click=(1, 2, 3)]bar[/]baz")
+    text = render_markup("foo[@click=(1, 2, 3)]bar[/]baz")
     assert text.get_style_at_offset(console, 3).meta == {"@click": (1, 2, 3)}

@@ -2,7 +2,7 @@ import sys
 
 import pytest
 
-from rich.console import Console
+from rich._console_entry import Console, console_class
 from rich.measure import Measurement
 from rich.tree import Tree
 
@@ -45,7 +45,7 @@ def test_render_ascii():
     tree.add("bar")
     tree.add("baz")
 
-    class AsciiConsole(Console):
+    class AsciiConsole(console_class()):
         @property
         def encoding(self):
             return "ascii"

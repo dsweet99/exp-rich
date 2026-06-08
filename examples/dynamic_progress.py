@@ -6,18 +6,18 @@ each of which consisting of multiple steps.
 
 """
 
+import importlib as _importlib
 import time
 
-from rich.console import Group
-from rich.panel import Panel
-from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
+Group = _importlib.import_module("rich._console_entry").Group
+Panel = _importlib.import_module("rich.panel").Panel
+Live = _importlib.import_module("rich.live").Live
+_progress = _importlib.import_module("rich.progress")
+BarColumn = _progress.BarColumn
+Progress = _progress.Progress
+SpinnerColumn = _progress.SpinnerColumn
+TextColumn = _progress.TextColumn
+TimeElapsedColumn = _progress.TimeElapsedColumn
 
 
 def run_steps(name, step_times, app_steps_task_id):
@@ -82,36 +82,37 @@ apps = [
     ("three", (2, 1, 3, 2)),
 ]
 
-# create overall progress bar
-overall_task_id = overall_progress.add_task("", total=len(apps))
+if __name__ == "__main__":
+    # create overall progress bar
+    overall_task_id = overall_progress.add_task("", total=len(apps))
 
-# use own live instance as context manager with group of progress bars,
-# which allows for running multiple different progress bars in parallel,
-# and dynamically showing/hiding them
-with Live(progress_group):
-    for idx, (name, step_times) in enumerate(apps):
-        # update message on overall progress bar
-        top_descr = "[bold #AAAAAA](%d out of %d apps installed)" % (idx, len(apps))
-        overall_progress.update(overall_task_id, description=top_descr)
+    # use own live instance as context manager with group of progress bars,
+    # which allows for running multiple different progress bars in parallel,
+    # and dynamically showing/hiding them
+    with Live(progress_group):
+        for idx, (name, step_times) in enumerate(apps):
+            # update message on overall progress bar
+            top_descr = "[bold #AAAAAA](%d out of %d apps installed)" % (idx, len(apps))
+            overall_progress.update(overall_task_id, description=top_descr)
 
-        # add progress bar for steps of this app, and run the steps
-        current_task_id = current_app_progress.add_task("Installing app %s" % name)
-        app_steps_task_id = app_steps_progress.add_task(
-            "", total=len(step_times), name=name
+            # add progress bar for steps of this app, and run the steps
+            current_task_id = current_app_progress.add_task("Installing app %s" % name)
+            app_steps_task_id = app_steps_progress.add_task(
+                "", total=len(step_times), name=name
+            )
+            run_steps(name, step_times, app_steps_task_id)
+
+            # stop and hide steps progress bar for this specific app
+            app_steps_progress.update(app_steps_task_id, visible=False)
+            current_app_progress.stop_task(current_task_id)
+            current_app_progress.update(
+                current_task_id, description="[bold green]App %s installed!" % name
+            )
+
+            # increase overall progress now this task is done
+            overall_progress.update(overall_task_id, advance=1)
+
+        # final update for message on overall progress bar
+        overall_progress.update(
+            overall_task_id, description="[bold green]%s apps installed, done!" % len(apps)
         )
-        run_steps(name, step_times, app_steps_task_id)
-
-        # stop and hide steps progress bar for this specific app
-        app_steps_progress.update(app_steps_task_id, visible=False)
-        current_app_progress.stop_task(current_task_id)
-        current_app_progress.update(
-            current_task_id, description="[bold green]App %s installed!" % name
-        )
-
-        # increase overall progress now this task is done
-        overall_progress.update(overall_task_id, advance=1)
-
-    # final update for message on overall progress bar
-    overall_progress.update(
-        overall_task_id, description="[bold green]%s apps installed, done!" % len(apps)
-    )

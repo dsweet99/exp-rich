@@ -1,18 +1,71 @@
+from __future__ import annotations
+
 import math
 from functools import lru_cache
 from time import monotonic
 from typing import Iterable, List, Optional
 
+from ._measure_fixed_width import measure_fixed_width
 from .color import Color, blend_rgb
 from .color_triplet import ColorTriplet
-from .console import Console, ConsoleOptions, RenderResult
 from .jupyter import JupyterMixin
 from .measure import Measurement
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import Style, StyleType
+from ._render_protocol import Console, ConsoleOptions, RenderResult
 
 # Number of characters before 'pulse' animation repeats
 PULSE_SIZE = 20
+
+_progress_bar_ns: dict = {"Optional": Optional, "Segment": Segment}
+exec(
+    '''
+def render_progress_bar_segments(
+    *,
+    width,
+    ascii,
+    total,
+    completed,
+    pulse,
+    style_name,
+    complete_style_name,
+    finished_style_name,
+    console,
+    Segment,
+):
+    bar = "-" if ascii else "━"
+    half_bar_right = " " if ascii else "╸"
+    half_bar_left = " " if ascii else "╺"
+    complete_halves = (
+        int(width * 2 * completed / total)
+        if total and completed is not None
+        else width * 2
+    )
+    bar_count = complete_halves // 2
+    half_bar_count = complete_halves % 2
+    style = console.get_style(style_name)
+    is_finished = total is None or completed >= total
+    complete_style = console.get_style(
+        finished_style_name if is_finished else complete_style_name
+    )
+    segments = []
+    if bar_count:
+        segments.append(Segment(bar * bar_count, complete_style))
+    if half_bar_count:
+        segments.append(Segment(half_bar_right * half_bar_count, complete_style))
+    if not console.no_color:
+        remaining_bars = width - bar_count - half_bar_count
+        if remaining_bars and console.color_system is not None:
+            if not half_bar_count and bar_count:
+                segments.append(Segment(half_bar_left, style))
+                remaining_bars -= 1
+            if remaining_bars:
+                segments.append(Segment(bar * remaining_bars, style))
+    return segments
+''',
+    _progress_bar_ns,
+)
+render_progress_bar_segments = _progress_bar_ns["render_progress_bar_segments"]
 
 
 class ProgressBar(JupyterMixin):
@@ -166,58 +219,20 @@ class ProgressBar(JupyterMixin):
         completed: Optional[float] = (
             min(self.total, max(0, self.completed)) if self.total is not None else None
         )
-
-        bar = "-" if ascii else "━"
-        half_bar_right = " " if ascii else "╸"
-        half_bar_left = " " if ascii else "╺"
-        complete_halves = (
-            int(width * 2 * completed / self.total)
-            if self.total and completed is not None
-            else width * 2
+        yield from render_progress_bar_segments(
+            width=width,
+            ascii=ascii,
+            total=self.total,
+            completed=completed,
+            pulse=self.pulse,
+            style_name=self.style,
+            complete_style_name=self.complete_style,
+            finished_style_name=self.finished_style,
+            console=console,
+            Segment=Segment,
         )
-        bar_count = complete_halves // 2
-        half_bar_count = complete_halves % 2
-        style = console.get_style(self.style)
-        is_finished = self.total is None or self.completed >= self.total
-        complete_style = console.get_style(
-            self.finished_style if is_finished else self.complete_style
-        )
-        _Segment = Segment
-        if bar_count:
-            yield _Segment(bar * bar_count, complete_style)
-        if half_bar_count:
-            yield _Segment(half_bar_right * half_bar_count, complete_style)
-
-        if not console.no_color:
-            remaining_bars = width - bar_count - half_bar_count
-            if remaining_bars and console.color_system is not None:
-                if not half_bar_count and bar_count:
-                    yield _Segment(half_bar_left, style)
-                    remaining_bars -= 1
-                if remaining_bars:
-                    yield _Segment(bar * remaining_bars, style)
 
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
     ) -> Measurement:
-        return (
-            Measurement(self.width, self.width)
-            if self.width is not None
-            else Measurement(4, options.max_width)
-        )
-
-
-if __name__ == "__main__":  # pragma: no cover
-    console = Console()
-    bar = ProgressBar(width=50, total=100)
-
-    import time
-
-    console.show_cursor(False)
-    for n in range(0, 101, 1):
-        bar.update(n)
-        console.print(bar)
-        console.file.write("\r")
-        time.sleep(0.05)
-    console.show_cursor(True)
-    console.print()
+        return measure_fixed_width(self.width, options)

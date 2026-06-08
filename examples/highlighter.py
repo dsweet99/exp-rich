@@ -2,7 +2,7 @@
 This example demonstrates a simple text highlighter.
 """
 
-from rich.console import Console
+from rich._console_entry import Console
 from rich.highlighter import RegexHighlighter
 from rich.theme import Theme
 
@@ -17,4 +17,5 @@ class EmailHighlighter(RegexHighlighter):
 theme = Theme({"example.email": "bold magenta"})
 console = Console(highlighter=EmailHighlighter(), theme=theme)
 
-console.print("Send funds to money@example.org")
+if __name__ == "__main__":
+    console.print("Send funds to money@example.org")

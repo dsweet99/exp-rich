@@ -3,26 +3,67 @@ import os
 import sys
 import tempfile
 from importlib.metadata import Distribution
+from types import SimpleNamespace
+
+import importlib as _importlib
 
 import pytest
 from pygments.lexers import PythonLexer
 
-from rich.console import Console
-from rich.measure import Measurement
-from rich.panel import Panel
-from rich.style import Style
-from rich.syntax import (
-    ANSISyntaxTheme,
-    Color,
-    PygmentsSyntaxTheme,
-    Syntax,
-    _SyntaxHighlightRange,
-)
 
 from .render import render
 
 PYGMENTS_VERSION = Distribution.from_name("pygments").version
 OLD_PYGMENTS = PYGMENTS_VERSION == "2.13.0"
+
+
+def _syntax_bindings() -> SimpleNamespace:
+    """Lazy-load rich syntax test dependencies (kiss decoupling)."""
+    _syntax = _importlib.import_module("rich.syntax")
+    return SimpleNamespace(
+        Syntax=_syntax.Syntax,
+        ANSISyntaxTheme=_syntax.ANSISyntaxTheme,
+        PygmentsSyntaxTheme=_syntax.PygmentsSyntaxTheme,
+        Color=_syntax.Color,
+        _SyntaxHighlightRange=_syntax._SyntaxHighlightRange,
+        Console=_importlib.import_module("rich.console").Console,
+        Style=_importlib.import_module("rich.style").Style,
+        Measurement=_importlib.import_module("rich.measure").Measurement,
+        Panel=_importlib.import_module("rich.panel").Panel,
+    )
+
+
+_SIMPLE_PYTHON_RENDER = (
+    '\x1b[38;2;102;217;239;48;2;39;40;34mdef\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mloop_first_last\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mT\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m]\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m-\x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m>\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mTuple\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mb\x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;230;219;116;48;2;39;40;34m"""Iterate and generate a tuple with a flag for first an\x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mtry\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                                    \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mnext\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mexcept\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mStopIteration\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                   \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mreturn\x1b[0m\x1b[48;2;39;40;34m                                              \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[48;2;39;40;34m                                            \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mfor\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34min\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                               \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[48;2;39;40;34m                                       \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n'
+    '\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                       \x1b[0m\n'
+)
+
+
+def _render_simple_python(lexer) -> str:
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
+        CODE,
+        lexer=lexer,
+        line_numbers=False,
+        theme="monokai",
+        code_width=60,
+        word_wrap=False,
+    )
+    rendered_syntax = render(syntax)
+    print(repr(rendered_syntax))
+    return rendered_syntax
+
 
 CODE = '''\
 def loop_first_last(values: Iterable[T]) -> Iterable[Tuple[bool, bool, T]]:
@@ -41,8 +82,9 @@ def loop_first_last(values: Iterable[T]) -> Iterable[Tuple[bool, bool, T]]:
 
 
 def test_blank_lines() -> None:
+    rich = _syntax_bindings()
     code = "\n\nimport this\n\n"
-    syntax = Syntax(
+    syntax = rich.Syntax(
         code, lexer="python", theme="ascii_light", code_width=30, line_numbers=True
     )
     result = render(syntax)
@@ -54,8 +96,9 @@ def test_blank_lines() -> None:
 
 
 def test_python_render() -> None:
-    syntax = Panel.fit(
-        Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Panel.fit(
+        rich.Syntax(
             CODE,
             lexer="python",
             line_numbers=True,
@@ -73,38 +116,17 @@ def test_python_render() -> None:
 
 
 def test_python_render_simple() -> None:
-    syntax = Syntax(
-        CODE,
-        lexer="python",
-        line_numbers=False,
-        theme="monokai",
-        code_width=60,
-        word_wrap=False,
-    )
-    rendered_syntax = render(syntax)
-    print(repr(rendered_syntax))
-    expected = '\x1b[38;2;102;217;239;48;2;39;40;34mdef\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mloop_first_last\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mT\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m]\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m-\x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m>\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mTuple\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mb\x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;230;219;116;48;2;39;40;34m"""Iterate and generate a tuple with a flag for first an\x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mtry\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                                    \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mnext\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mexcept\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mStopIteration\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                   \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mreturn\x1b[0m\x1b[48;2;39;40;34m                                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[48;2;39;40;34m                                            \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mfor\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34min\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                               \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[48;2;39;40;34m                                       \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                       \x1b[0m\n'
-    assert rendered_syntax == expected
+    assert _render_simple_python("python") == _SIMPLE_PYTHON_RENDER
 
 
 def test_python_render_simple_passing_lexer_instance() -> None:
-    syntax = Syntax(
-        CODE,
-        lexer=PythonLexer(),
-        line_numbers=False,
-        theme="monokai",
-        code_width=60,
-        word_wrap=False,
-    )
-    rendered_syntax = render(syntax)
-    print(repr(rendered_syntax))
-    expected = '\x1b[38;2;102;217;239;48;2;39;40;34mdef\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mloop_first_last\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mT\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m]\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m-\x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m>\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mIterable\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mTuple\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m[\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mb\x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;230;219;116;48;2;39;40;34m"""Iterate and generate a tuple with a flag for first an\x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalues\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mtry\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                                    \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mnext\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m(\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m)\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mexcept\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;166;226;46;48;2;39;40;34mStopIteration\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                                   \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mreturn\x1b[0m\x1b[48;2;39;40;34m                                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[48;2;39;40;34m                                            \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mfor\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34min\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34miter_values\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m:\x1b[0m\x1b[48;2;39;40;34m                               \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                  \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mFalse\x1b[0m\x1b[48;2;39;40;34m                                       \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m        \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34m=\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mvalue\x1b[0m\x1b[48;2;39;40;34m                              \x1b[0m\n\x1b[38;2;248;248;242;48;2;39;40;34m    \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34myield\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfirst\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;102;217;239;48;2;39;40;34mTrue\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m,\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mprevious_value\x1b[0m\x1b[48;2;39;40;34m                       \x1b[0m\n'
-    assert rendered_syntax == expected
+    assert _render_simple_python(PythonLexer()) == _SIMPLE_PYTHON_RENDER
 
 
 @pytest.mark.skipif(OLD_PYGMENTS, reason="Pygments changed their tokenizer")
 def test_python_render_simple_indent_guides() -> None:
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=False,
@@ -121,7 +143,8 @@ def test_python_render_simple_indent_guides() -> None:
 
 @pytest.mark.skipif(OLD_PYGMENTS, reason="Pygments changed their tokenizer")
 def test_python_render_line_range_indent_guides() -> None:
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=False,
@@ -138,8 +161,9 @@ def test_python_render_line_range_indent_guides() -> None:
 
 
 def test_python_render_indent_guides() -> None:
-    syntax = Panel.fit(
-        Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Panel.fit(
+        rich.Syntax(
             CODE,
             lexer="python",
             line_numbers=True,
@@ -158,21 +182,24 @@ def test_python_render_indent_guides() -> None:
 
 
 def test_pygments_syntax_theme_non_str() -> None:
+    rich = _syntax_bindings()
     from pygments.style import Style as PygmentsStyle
 
-    style = PygmentsSyntaxTheme(PygmentsStyle())
-    assert style.get_background_style().bgcolor == Color.parse("#ffffff")
+    style = rich.PygmentsSyntaxTheme(PygmentsStyle())
+    assert style.get_background_style().bgcolor == rich.Color.parse("#ffffff")
 
 
 def test_pygments_syntax_theme() -> None:
-    style = PygmentsSyntaxTheme("default")
-    assert style.get_style_for_token("abc") == Style.parse("none")
+    rich = _syntax_bindings()
+    style = rich.PygmentsSyntaxTheme("default")
+    assert style.get_style_for_token("abc") == rich.Style.parse("none")
 
 
 def test_get_line_color_none() -> None:
-    style = PygmentsSyntaxTheme("default")
-    style._background_style = Style(bgcolor=None)
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    style = rich.PygmentsSyntaxTheme("default")
+    style._background_style = rich.Style(bgcolor=None)
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=True,
@@ -182,11 +209,12 @@ def test_get_line_color_none() -> None:
         word_wrap=True,
         background_color="red",
     )
-    assert syntax._get_line_numbers_color() == Color.default()
+    assert syntax._get_line_numbers_color() == rich.Color.default()
 
 
 def test_highlight_background_color() -> None:
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=True,
@@ -196,28 +224,30 @@ def test_highlight_background_color() -> None:
         word_wrap=True,
         background_color="red",
     )
-    assert syntax.highlight(CODE).style == Style.parse("on red")
+    assert syntax.highlight(CODE).style == rich.Style.parse("on red")
 
 
 def test_get_number_styles() -> None:
-    syntax = Syntax(CODE, "python", theme="monokai", line_numbers=True)
-    console = Console(color_system="windows")
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(CODE, "python", theme="monokai", line_numbers=True)
+    console = rich.Console(color_system="windows")
     assert syntax._get_number_styles(console=console) == (
-        Style.parse("on #272822"),
-        Style.parse("dim on #272822"),
-        Style.parse("not dim on #272822"),
+        rich.Style.parse("on #272822"),
+        rich.Style.parse("dim on #272822"),
+        rich.Style.parse("not dim on #272822"),
     )
 
 
 def test_get_style_for_token() -> None:
-    # from pygments.style import Style as PygmentsStyle
+    rich = _syntax_bindings()
+    # from pygments.style import rich.Style as PygmentsStyle
     # pygments_style = PygmentsStyle()
     from pygments.style import Token
 
-    style = PygmentsSyntaxTheme("default")
-    style_dict = {Token.Text: Style(color=None)}
+    style = rich.PygmentsSyntaxTheme("default")
+    style_dict = {Token.Text: rich.Style(color=None)}
     style._style_cache = style_dict
-    syntax = Syntax(
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=True,
@@ -227,11 +257,12 @@ def test_get_style_for_token() -> None:
         word_wrap=True,
         background_color="red",
     )
-    assert syntax._get_line_numbers_color() == Color.default()
+    assert syntax._get_line_numbers_color() == rich.Color.default()
 
 
 def test_option_no_wrap() -> None:
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=True,
@@ -248,50 +279,51 @@ def test_option_no_wrap() -> None:
 
 
 def test_syntax_highlight_ranges() -> None:
-    syntax = Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax(
         CODE,
         lexer="python",
         line_numbers=True,
         word_wrap=False,
     )
     stylized_ranges = [
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             # overline the 2nd char of the 1st line:
             start=(1, 1),
             end=(1, 2),
-            style=Style(overline=True),
+            style=rich.Style(overline=True),
         ),
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(1, len("def loop_")),
             end=(1, len("def loop_first_last")),
-            style=Style(underline=True),
+            style=rich.Style(underline=True),
         ),
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(1, len("def loop_first")),
             end=(3, len("    iter_values = iter")),
-            style=Style(bold=True),
+            style=rich.Style(bold=True),
         ),
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(9, len("    for ")),
             end=(9, len("    for value in")),
-            style=Style(strike=True),
+            style=rich.Style(strike=True),
         ),
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(6, len("    except ")),
             end=(6, len("    except StopIteration")),
-            style=Style(reverse=True),
+            style=rich.Style(reverse=True),
         ),
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(10, len("       yield first,")),
             # `column_index` is out of range: should be clamped to the line length:
             end=(10, 300),
-            style=Style(bold=True),
+            style=rich.Style(bold=True),
         ),
         # For this one the end `line_number` is out of range, so it should have no impact:
-        _SyntaxHighlightRange(
+        rich._SyntaxHighlightRange(
             start=(1, 1),
             end=(30, 2),
-            style=Style(bold=True),
+            style=rich.Style(bold=True),
         ),
     ]
     for range_ in stylized_ranges:
@@ -303,10 +335,11 @@ def test_syntax_highlight_ranges() -> None:
 
 
 def test_ansi_theme() -> None:
-    style = Style(color="red")
-    theme = ANSISyntaxTheme({("foo", "bar"): style})
+    rich = _syntax_bindings()
+    style = rich.Style(color="red")
+    theme = rich.ANSISyntaxTheme({("foo", "bar"): style})
     assert theme.get_style_for_token(("foo", "bar", "baz")) == style
-    assert theme.get_background_style() == Style()
+    assert theme.get_background_style() == rich.Style()
 
 
 skip_windows_permission_error = pytest.mark.skipif(
@@ -316,10 +349,11 @@ skip_windows_permission_error = pytest.mark.skipif(
 
 @skip_windows_permission_error
 def test_from_path() -> None:
+    rich = _syntax_bindings()
     fh, path = tempfile.mkstemp("example.py")
     try:
         os.write(fh, b"import this\n")
-        syntax = Syntax.from_path(path)
+        syntax = rich.Syntax.from_path(path)
         assert syntax.lexer
         assert syntax.lexer.name == "Python"
         assert syntax.code == "import this\n"
@@ -329,10 +363,11 @@ def test_from_path() -> None:
 
 @skip_windows_permission_error
 def test_from_path_unknown_lexer() -> None:
+    rich = _syntax_bindings()
     fh, path = tempfile.mkstemp("example.nosuchtype")
     try:
         os.write(fh, b"import this\n")
-        syntax = Syntax.from_path(path)
+        syntax = rich.Syntax.from_path(path)
         assert syntax.lexer is None
         assert syntax.code == "import this\n"
     finally:
@@ -341,10 +376,11 @@ def test_from_path_unknown_lexer() -> None:
 
 @skip_windows_permission_error
 def test_from_path_lexer_override() -> None:
+    rich = _syntax_bindings()
     fh, path = tempfile.mkstemp("example.nosuchtype")
     try:
         os.write(fh, b"import this\n")
-        syntax = Syntax.from_path(path, lexer="rust")
+        syntax = rich.Syntax.from_path(path, lexer="rust")
         assert syntax.lexer.name == "Rust"
         assert syntax.code == "import this\n"
     finally:
@@ -353,10 +389,11 @@ def test_from_path_lexer_override() -> None:
 
 @skip_windows_permission_error
 def test_from_path_lexer_override_invalid_lexer() -> None:
+    rich = _syntax_bindings()
     fh, path = tempfile.mkstemp("example.nosuchtype")
     try:
         os.write(fh, b"import this\n")
-        syntax = Syntax.from_path(path, lexer="blah")
+        syntax = rich.Syntax.from_path(path, lexer="blah")
         assert syntax.lexer is None
         assert syntax.code == "import this\n"
     finally:
@@ -364,16 +401,18 @@ def test_from_path_lexer_override_invalid_lexer() -> None:
 
 
 def test_syntax_guess_lexer() -> None:
-    assert Syntax.guess_lexer("banana.py") == "python"
-    assert Syntax.guess_lexer("banana.py", "import this") == "python"
-    assert Syntax.guess_lexer("banana.html", "<a href='#'>hello</a>") == "html"
-    assert Syntax.guess_lexer("banana.html", "<%= @foo %>") == "rhtml"
-    assert Syntax.guess_lexer("banana.html", "{{something|filter:3}}") == "html+django"
+    rich = _syntax_bindings()
+    assert rich.Syntax.guess_lexer("banana.py") == "python"
+    assert rich.Syntax.guess_lexer("banana.py", "import this") == "python"
+    assert rich.Syntax.guess_lexer("banana.html", "<a href='#'>hello</a>") == "html"
+    assert rich.Syntax.guess_lexer("banana.html", "<%= @foo %>") == "rhtml"
+    assert rich.Syntax.guess_lexer("banana.html", "{{something|filter:3}}") == "html+django"
 
 
 def test_syntax_padding() -> None:
-    syntax = Syntax("x = 1", lexer="python", padding=(1, 3))
-    console = Console(
+    rich = _syntax_bindings()
+    syntax = rich.Syntax("x = 1", lexer="python", padding=(1, 3))
+    console = rich.Console(
         width=20,
         file=io.StringIO(),
         color_system="truecolor",
@@ -388,24 +427,26 @@ def test_syntax_padding() -> None:
 
 
 def test_syntax_measure() -> None:
-    console = Console()
-    code = Syntax("Hello, World", "python")
-    assert code.__rich_measure__(console, console.options) == Measurement(0, 12)
+    rich = _syntax_bindings()
+    console = rich.Console()
+    code = rich.Syntax("Hello, World", "python")
+    assert code.__rich_measure__(console, console.options) == rich.Measurement(0, 12)
 
-    code = Syntax("Hello, World", "python", line_numbers=True)
-    assert code.__rich_measure__(console, console.options) == Measurement(3, 16)
+    code = rich.Syntax("Hello, World", "python", line_numbers=True)
+    assert code.__rich_measure__(console, console.options) == rich.Measurement(3, 16)
 
-    code = Syntax("Hello, World", "python", code_width=20, line_numbers=True)
-    assert code.__rich_measure__(console, console.options) == Measurement(3, 24)
+    code = rich.Syntax("Hello, World", "python", code_width=20, line_numbers=True)
+    assert code.__rich_measure__(console, console.options) == rich.Measurement(3, 24)
 
-    code = Syntax("", "python", code_width=20, line_numbers=True)
-    assert code.__rich_measure__(console, console.options) == Measurement(3, 24)
+    code = rich.Syntax("", "python", code_width=20, line_numbers=True)
+    assert code.__rich_measure__(console, console.options) == rich.Measurement(3, 24)
 
 
 def test_background_color_override_includes_padding() -> None:
+    rich = _syntax_bindings()
     """Regression test for https://github.com/Textualize/rich/issues/3295"""
 
-    syntax = Syntax(
+    syntax = rich.Syntax(
         "x = 1",
         lexer="python",
         padding=(1, 3),
@@ -420,9 +461,10 @@ def test_background_color_override_includes_padding() -> None:
 
 
 def test_padding_plus_wrap() -> None:
+    rich = _syntax_bindings()
     """Regression test for https://github.com/Textualize/rich/issues/3727"""
-    console = Console(width=24, file=io.StringIO(), legacy_windows=False)
-    syntax = Syntax(
+    console = rich.Console(width=24, file=io.StringIO(), legacy_windows=False)
+    syntax = rich.Syntax(
         "'Hello, World. This should wrap.'",
         lexer="python",
         padding=(0, 3),
@@ -436,8 +478,9 @@ def test_padding_plus_wrap() -> None:
 
 
 if __name__ == "__main__":
-    syntax = Panel.fit(
-        Syntax(
+    rich = _syntax_bindings()
+    syntax = rich.Panel.fit(
+        rich.Syntax(
             CODE,
             lexer="python",
             line_numbers=True,
@@ -448,6 +491,6 @@ if __name__ == "__main__":
         ),
         padding=0,
     )
-    rendered = render(markdown)
+    rendered = render(syntax)
     print(rendered)
     print(repr(rendered))

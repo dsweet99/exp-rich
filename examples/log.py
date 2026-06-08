@@ -3,7 +3,7 @@ A simulation of Rich console logging.
 """
 
 import time
-from rich.console import Console
+from rich._console_entry import Console
 from rich.style import Style
 from rich.theme import Theme
 from rich.highlighter import RegexHighlighter
@@ -17,42 +17,7 @@ class RequestHighlighter(RegexHighlighter):
     ]
 
 
-theme = Theme(
-    {
-        "req.protocol": Style.parse("dim bold green"),
-        "req.method": Style.parse("bold cyan"),
-        "req.path": Style.parse("magenta"),
-        "req.filename": Style.parse("bright_magenta"),
-        "req.result": Style.parse("yellow"),
-        "req.stats": Style.parse("dim"),
-    }
-)
-console = Console(theme=theme)
-
-console.log("Server starting...")
-console.log("Serving on http://127.0.0.1:8000")
-
-time.sleep(1)
-
-request_highlighter = RequestHighlighter()
-
-console.log(
-    request_highlighter("HTTP GET /foo/bar/baz/egg.html 200 [0.57, 127.0.0.1:59076]"),
-)
-
-console.log(
-    request_highlighter(
-        "HTTP GET /foo/bar/baz/background.jpg 200 [0.57, 127.0.0.1:59076]"
-    ),
-)
-
-
-time.sleep(1)
-
-
 def test_locals():
-    foo = (1, 2, 3)
-    movies = ["Deadpool", "Rise of the Skywalker"]
     console = Console()
 
     console.log(
@@ -74,4 +39,35 @@ def test_locals():
     )
 
 
-test_locals()
+if __name__ == "__main__":
+    theme = Theme(
+        {
+            "req.protocol": Style.parse("dim bold green"),
+            "req.method": Style.parse("bold cyan"),
+            "req.path": Style.parse("magenta"),
+            "req.filename": Style.parse("bright_magenta"),
+            "req.result": Style.parse("yellow"),
+            "req.stats": Style.parse("dim"),
+        }
+    )
+    console = Console(theme=theme)
+
+    console.log("Server starting...")
+    console.log("Serving on http://127.0.0.1:8000")
+
+    time.sleep(1)
+
+    request_highlighter = RequestHighlighter()
+
+    console.log(
+        request_highlighter("HTTP GET /foo/bar/baz/egg.html 200 [0.57, 127.0.0.1:59076]"),
+    )
+
+    console.log(
+        request_highlighter(
+            "HTTP GET /foo/bar/baz/background.jpg 200 [0.57, 127.0.0.1:59076]"
+        ),
+    )
+
+    time.sleep(1)
+    test_locals()

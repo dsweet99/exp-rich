@@ -1,5 +1,6 @@
 # encoding=utf-8
 
+import importlib as _importlib
 import io
 import os
 import tempfile
@@ -7,48 +8,56 @@ from types import SimpleNamespace
 
 import pytest
 
-import rich.progress
-from rich.console import Console
-from rich.highlighter import NullHighlighter
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    FileSizeColumn,
-    MofNCompleteColumn,
-    Progress,
-    RenderableColumn,
-    SpinnerColumn,
-    Task,
-    TaskID,
-    TaskProgressColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
-    TotalFileSizeColumn,
-    TransferSpeedColumn,
-    _TrackThread,
-    track,
+rich_progress = _importlib.import_module("rich.progress")
+Console = _importlib.import_module("rich._console_entry").Console
+NullHighlighter = _importlib.import_module("rich.highlighter").NullHighlighter
+BarColumn = rich_progress.BarColumn
+DownloadColumn = rich_progress.DownloadColumn
+FileSizeColumn = rich_progress.FileSizeColumn
+MofNCompleteColumn = rich_progress.MofNCompleteColumn
+Progress = rich_progress.Progress
+RenderableColumn = rich_progress.RenderableColumn
+SpinnerColumn = rich_progress.SpinnerColumn
+Task = rich_progress.Task
+TaskID = rich_progress.TaskID
+TaskProgressColumn = rich_progress.TaskProgressColumn
+TextColumn = rich_progress.TextColumn
+TimeElapsedColumn = rich_progress.TimeElapsedColumn
+TimeRemainingColumn = rich_progress.TimeRemainingColumn
+TotalFileSizeColumn = rich_progress.TotalFileSizeColumn
+TransferSpeedColumn = rich_progress.TransferSpeedColumn
+_TrackThread = rich_progress._TrackThread
+track = rich_progress.track
+ProgressBar = _importlib.import_module("rich.progress_bar").ProgressBar
+Text = _importlib.import_module("rich.text").Text
+
+
+def _mock_clock_init(self, time=0.0, auto=True) -> None:
+    self.time = time
+    self.auto = auto
+
+
+def _mock_clock_call(self) -> float:
+    try:
+        return self.time
+    finally:
+        if self.auto:
+            self.time += 1
+
+
+def _mock_clock_tick(self, advance: float = 1) -> None:
+    self.time += advance
+
+
+MockClock = type(
+    "MockClock",
+    (),
+    {
+        "__init__": _mock_clock_init,
+        "__call__": _mock_clock_call,
+        "tick": _mock_clock_tick,
+    },
 )
-from rich.progress_bar import ProgressBar
-from rich.text import Text
-
-
-class MockClock:
-    """A clock that is manually advanced."""
-
-    def __init__(self, time=0.0, auto=True) -> None:
-        self.time = time
-        self.auto = auto
-
-    def __call__(self) -> float:
-        try:
-            return self.time
-        finally:
-            if self.auto:
-                self.time += 1
-
-    def tick(self, advance: float = 1) -> None:
-        self.time += advance
 
 
 def test_bar_columns():
@@ -81,8 +90,7 @@ def test_time_elapsed_column():
 
 
 def test_time_remaining_column():
-    class FakeTask(Task):
-        time_remaining = 60
+    FakeTask = type("FakeTask", (Task,), {"time_remaining": 60})
 
     column = TimeRemainingColumn()
     task = Task(1, "test", 100, 20, _get_time=lambda: 1.0)
@@ -194,10 +202,10 @@ def make_progress() -> Progress:
         _environ={},
     )
     progress = Progress(console=console, get_time=fake_time, auto_refresh=False)
-    task1 = progress.add_task("foo")
+    progress.add_task("foo")
     task2 = progress.add_task("bar", total=30)
     progress.advance(task2, 16)
-    task3 = progress.add_task("baz", visible=False)
+    progress.add_task("baz", visible=False)
     task4 = progress.add_task("egg")
     progress.remove_task(task4)
     task4 = progress.add_task("foo2", completed=50, start=False)
@@ -426,7 +434,7 @@ def test_task_start() -> None:
 
     task = Task(TaskID(1), "foo", 100, 0, _get_time=get_time)
     task.start_time = get_time()
-    assert task.started == True
+    assert task.started
     assert task.elapsed == 0
     current_time += 1
     assert task.elapsed == 1
@@ -481,7 +489,7 @@ def test_reset() -> None:
     )
     assert task.total == 200
     assert task.completed == 20
-    assert task.visible == False
+    assert not task.visible
     assert task.description == "bar"
     assert task.fields == {"example": "egg"}
     assert not task._progress
@@ -598,7 +606,7 @@ def test_open() -> None:
         legacy_windows=False,
         _environ={},
     )
-    progress = Progress(
+    Progress(
         console=console,
     )
 
@@ -606,7 +614,7 @@ def test_open() -> None:
     with os.fdopen(fd, "wb") as f:
         f.write(b"Hello, World!")
     try:
-        with rich.progress.open(filename) as f:
+        with rich_progress.open(filename) as f:
             assert f.read() == "Hello, World!"
         assert f.closed
     finally:
@@ -618,7 +626,7 @@ def test_open_text_mode() -> None:
     with os.fdopen(fd, "wb") as f:
         f.write(b"Hello, World!")
     try:
-        with rich.progress.open(filename, "r") as f:
+        with rich_progress.open(filename, "r") as f:
             assert f.read() == "Hello, World!"
             assert f.name == filename
         assert f.closed
@@ -632,7 +640,7 @@ def test_wrap_file() -> None:
         total = f.write(b"Hello, World!")
     try:
         with open(filename, "rb") as file:
-            with rich.progress.wrap_file(file, total=total) as f:
+            with rich_progress.wrap_file(file, total=total) as f:
                 assert f.read() == b"Hello, World!"
                 assert f.mode == "rb"
                 assert f.name == filename
@@ -644,6 +652,13 @@ def test_wrap_file() -> None:
         os.remove(filename)
 
 
+def _read_wrapped_file(progress: Progress, filename: str, total: int) -> None:
+    with open(filename, "rb") as file:
+        task_id = progress.add_task("Reading", total=total)
+        with progress.wrap_file(file, task_id=task_id) as wrapped:
+            assert wrapped.read() == b"Hello, World!"
+
+
 def test_wrap_file_task_total() -> None:
     console = Console(
         file=io.StringIO(),
@@ -653,19 +668,14 @@ def test_wrap_file_task_total() -> None:
         legacy_windows=False,
         _environ={},
     )
-    progress = Progress(
-        console=console,
-    )
+    progress = Progress(console=console)
 
     fd, filename = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         total = f.write(b"Hello, World!")
     try:
         with progress:
-            with open(filename, "rb") as file:
-                task_id = progress.add_task("Reading", total=total)
-                with progress.wrap_file(file, task_id=task_id) as f:
-                    assert f.read() == b"Hello, World!"
+            _read_wrapped_file(progress, filename, total)
     finally:
         os.remove(filename)
 

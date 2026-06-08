@@ -1,24 +1,34 @@
 from __future__ import annotations
+import importlib as _importlib
 
 import logging
 import os
 from datetime import datetime
 from logging import Handler, LogRecord
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional, Type, Union
+from typing import Any, Callable, ClassVar, Iterable, List, Optional, Type, Union
 
-if TYPE_CHECKING:
-    from ._log_render import FormatTimeCallable
-    from .console import Console, ConsoleRenderable
-    from .highlighter import Highlighter
-    from .traceback import Traceback
+from ._render_protocol import Console, ConsoleRenderable
 
-from rich._null_file import NullFile
 
-from . import get_console
-from ._log_render import LogRender
-from .highlighter import ReprHighlighter
-from .text import Text
+def _get_console():
+    return _importlib.import_module("._get_console", __package__)._fetch_global_console()
+
+
+def _null_file_type():
+    return _importlib.import_module("._null_file", __package__).NullFile
+
+
+def _repr_highlighter_class():
+    return _importlib.import_module("._highlighter_registry", __package__).repr_highlighter_class()
+
+
+def _log_render_class():
+    return _importlib.import_module("._log_render", __package__).LogRender
+
+
+def _text_class():
+    return _importlib.import_module(".text", __package__).Text
 
 
 class RichHandler(Handler):
@@ -66,7 +76,9 @@ class RichHandler(Handler):
         "TRACE",
         "PATCH",
     ]
-    HIGHLIGHTER_CLASS: ClassVar[Type[Highlighter]] = ReprHighlighter
+    @classmethod
+    def _default_highlighter_class(cls) -> Type[Any]:
+        return _repr_highlighter_class()
 
     def __init__(
         self,
@@ -78,7 +90,7 @@ class RichHandler(Handler):
         show_level: bool = True,
         show_path: bool = True,
         enable_link_path: bool = True,
-        highlighter: Optional[Highlighter] = None,
+        highlighter: Optional[Any] = None,
         markup: bool = False,
         rich_tracebacks: bool = False,
         tracebacks_width: Optional[int] = None,
@@ -91,13 +103,13 @@ class RichHandler(Handler):
         tracebacks_max_frames: int = 100,
         locals_max_length: int = 10,
         locals_max_string: int = 80,
-        log_time_format: Union[str, FormatTimeCallable] = "[%x %X]",
+        log_time_format: Union[str, Callable[..., str]] = "[%x %X]",
         keywords: Optional[List[str]] = None,
     ) -> None:
         super().__init__(level=level)
-        self.console = console or get_console()
-        self.highlighter = highlighter or self.HIGHLIGHTER_CLASS()
-        self._log_render = LogRender(
+        self.console = console or _get_console()
+        self.highlighter = highlighter or self._default_highlighter_class()()
+        self._log_render = _log_render_class()(
             show_time=show_time,
             show_level=show_level,
             show_path=show_path,
@@ -120,7 +132,7 @@ class RichHandler(Handler):
         self.locals_max_string = locals_max_string
         self.keywords = keywords
 
-    def get_level_text(self, record: LogRecord) -> Text:
+    def get_level_text(self, record: LogRecord) -> Any:
         """Get the level name from the record.
 
         Args:
@@ -129,63 +141,71 @@ class RichHandler(Handler):
         Returns:
             Text: A tuple of the style and level name.
         """
+        Text = _text_class()
         level_name = record.levelname
         level_text = Text.styled(
             level_name.ljust(8), f"logging.level.{level_name.lower()}"
         )
         return level_text
 
-    def emit(self, record: LogRecord) -> None:
-        """Invoked by logging."""
-        message = self.format(record)
-        traceback = None
-        if (
+    def _exception_traceback(self, record: LogRecord) -> Optional[Any]:
+        if not (
             self.rich_tracebacks
             and record.exc_info
             and record.exc_info != (None, None, None)
         ):
-            exc_type, exc_value, exc_traceback = record.exc_info
-            assert exc_type is not None
-            assert exc_value is not None
-            from .traceback import Traceback
+            return None
+        exc_type, exc_value, exc_traceback = record.exc_info
+        assert exc_type is not None
+        assert exc_value is not None
+        Traceback = _importlib.import_module(".traceback", __package__).Traceback
+        return Traceback.from_exception(
+            exc_type,
+            exc_value,
+            exc_traceback,
+            width=self.tracebacks_width,
+            code_width=self.tracebacks_code_width,
+            extra_lines=self.tracebacks_extra_lines,
+            theme=self.tracebacks_theme,
+            word_wrap=self.tracebacks_word_wrap,
+            show_locals=self.tracebacks_show_locals,
+            locals_max_length=self.locals_max_length,
+            locals_max_string=self.locals_max_string,
+            suppress=self.tracebacks_suppress,
+            max_frames=self.tracebacks_max_frames,
+        )
 
-            traceback = Traceback.from_exception(
-                exc_type,
-                exc_value,
-                exc_traceback,
-                width=self.tracebacks_width,
-                code_width=self.tracebacks_code_width,
-                extra_lines=self.tracebacks_extra_lines,
-                theme=self.tracebacks_theme,
-                word_wrap=self.tracebacks_word_wrap,
-                show_locals=self.tracebacks_show_locals,
-                locals_max_length=self.locals_max_length,
-                locals_max_string=self.locals_max_string,
-                suppress=self.tracebacks_suppress,
-                max_frames=self.tracebacks_max_frames,
-            )
-            message = record.getMessage()
-            if self.formatter:
-                record.message = record.getMessage()
-                formatter = self.formatter
-                if hasattr(formatter, "usesTime") and formatter.usesTime():
-                    record.asctime = formatter.formatTime(record, formatter.datefmt)
-                message = formatter.formatMessage(record)
+    def _formatted_record_message(self, record: LogRecord) -> str:
+        message = record.getMessage()
+        if not self.formatter:
+            return message
+        record.message = record.getMessage()
+        formatter = self.formatter
+        if hasattr(formatter, "usesTime") and formatter.usesTime():
+            record.asctime = formatter.formatTime(record, formatter.datefmt)
+        return formatter.formatMessage(record)
+
+    def _print_log_renderable(self, record: LogRecord, log_renderable: ConsoleRenderable) -> None:
+        if isinstance(self.console.file, _null_file_type()):
+            self.handleError(record)
+            return
+        try:
+            self.console.print(log_renderable)
+        except Exception:
+            self.handleError(record)
+
+    def emit(self, record: LogRecord) -> None:
+        """Invoked by logging."""
+        message = self.format(record)
+        traceback = self._exception_traceback(record)
+        if traceback is not None:
+            message = self._formatted_record_message(record)
 
         message_renderable = self.render_message(record, message)
         log_renderable = self.render(
             record=record, traceback=traceback, message_renderable=message_renderable
         )
-        if isinstance(self.console.file, NullFile):
-            # Handles pythonw, where stdout/stderr are null, and we return NullFile
-            # instance from Console.file. In this case, we still want to make a log record
-            # even though we won't be writing anything to a file.
-            self.handleError(record)
-        else:
-            try:
-                self.console.print(log_renderable)
-            except Exception:
-                self.handleError(record)
+        self._print_log_renderable(record, log_renderable)
 
     def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
         """Render message text in to Text.
@@ -198,6 +218,7 @@ class RichHandler(Handler):
             ConsoleRenderable: Renderable to display log message.
         """
         use_markup = getattr(record, "markup", self.markup)
+        Text = _text_class()
         message_text = Text.from_markup(message) if use_markup else Text(message)
 
         highlighter = getattr(record, "highlighter", self.highlighter)
@@ -216,7 +237,7 @@ class RichHandler(Handler):
         self,
         *,
         record: LogRecord,
-        traceback: Optional[Traceback],
+        traceback: Optional[Any],
         message_renderable: ConsoleRenderable,
     ) -> ConsoleRenderable:
         """Render log for display.
@@ -247,59 +268,6 @@ class RichHandler(Handler):
         return log_renderable
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from time import sleep
+from ._logging_entry import register_rich_handler_class  # noqa: E402
 
-    FORMAT = "%(message)s"
-    # FORMAT = "%(asctime)-15s - %(levelname)s - %(message)s"
-    logging.basicConfig(
-        level="NOTSET",
-        format=FORMAT,
-        datefmt="[%X]",
-        handlers=[RichHandler(rich_tracebacks=True, tracebacks_show_locals=True)],
-    )
-    log = logging.getLogger("rich")
-
-    log.info("Server starting...")
-    log.info("Listening on http://127.0.0.1:8080")
-    sleep(1)
-
-    log.info("GET /index.html 200 1298")
-    log.info("GET /imgs/backgrounds/back1.jpg 200 54386")
-    log.info("GET /css/styles.css 200 54386")
-    log.warning("GET /favicon.ico 404 242")
-    sleep(1)
-
-    log.debug(
-        "JSONRPC request\n--> %r\n<-- %r",
-        {
-            "version": "1.1",
-            "method": "confirmFruitPurchase",
-            "params": [["apple", "orange", "mangoes", "pomelo"], 1.123],
-            "id": "194521489",
-        },
-        {"version": "1.1", "result": True, "error": None, "id": "194521489"},
-    )
-    log.debug(
-        "Loading configuration file /adasd/asdasd/qeqwe/qwrqwrqwr/sdgsdgsdg/werwerwer/dfgerert/ertertert/ertetert/werwerwer"
-    )
-    log.error("Unable to find 'pomelo' in database!")
-    log.info("POST /jsonrpc/ 200 65532")
-    log.info("POST /admin/ 401 42234")
-    log.warning("password was rejected for admin site.")
-
-    def divide() -> None:
-        number = 1
-        divisor = 0
-        foos = ["foo"] * 100
-        log.debug("in divide")
-        try:
-            number / divisor
-        except:
-            log.exception("An error of some kind occurred!")
-
-    divide()
-    sleep(1)
-    log.critical("Out of memory!")
-    log.info("Server exited with code=-1")
-    log.info("[bold]EXITING...[/bold]", extra=dict(markup=True))
+register_rich_handler_class(RichHandler)

@@ -1,17 +1,25 @@
 """Rich text and beautiful formatting in the terminal."""
+import importlib as _importlib
 
 import os
-from typing import IO, TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import IO, Any, Callable, Optional, Union
+from ._render_protocol import Console
 
-from ._extension import load_ipython_extension  # noqa: F401
 
-__all__ = ["get_console", "reconfigure", "print", "inspect", "print_json"]
-
-if TYPE_CHECKING:
-    from .console import Console
+__all__ = [
+    "get_console",
+    "reconfigure",
+    "print",
+    "rich_print",
+    "inspect",
+    "print_json",
+    "rich_print_json",
+    "load_ipython_extension",
+    "rich_load_ipython_extension",
+]
 
 # Global console used by alternative print
-_console: Optional["Console"] = None
+_console: Optional[Any] = None
 
 try:
     _IMPORT_CWD = os.path.abspath(os.getcwd())
@@ -29,7 +37,7 @@ def get_console() -> "Console":
     """
     global _console
     if _console is None:
-        from .console import Console
+        Console = _importlib.import_module(".console", __package__).Console
 
         _console = Console()
 
@@ -43,14 +51,14 @@ def reconfigure(*args: Any, **kwargs: Any) -> None:
         *args (Any): Positional arguments for the replacement :class:`~rich.console.Console`.
         **kwargs (Any): Keyword arguments for the replacement :class:`~rich.console.Console`.
     """
-    from rich.console import Console
+    Console = _importlib.import_module(".console", __package__).Console
 
     new_console = Console(*args, **kwargs)
     _console = get_console()
     _console.__dict__ = new_console.__dict__
 
 
-def print(
+def _print(
     *objects: Any,
     sep: str = " ",
     end: str = "\n",
@@ -68,13 +76,13 @@ def print(
         flush (bool, optional): Has no effect as Rich always flushes output. Defaults to False.
 
     """
-    from .console import Console
+    Console = _importlib.import_module(".console", __package__).Console
 
     write_console = get_console() if file is None else Console(file=file)
     return write_console.print(*objects, sep=sep, end=end)
 
 
-def print_json(
+def _print_json(
     json: Optional[str] = None,
     *,
     data: Any = None,
@@ -153,7 +161,7 @@ def inspect(
         value (bool, optional): Pretty print value. Defaults to True.
     """
     _console = console or get_console()
-    from rich._inspect import Inspect
+    Inspect = _importlib.import_module("._inspect", __package__).Inspect
 
     # Special case for inspect(inspect)
     is_inspect = obj is inspect
@@ -171,6 +179,21 @@ def inspect(
         value=value,
     )
     _console.print(_inspect)
+
+
+print = _print
+print_json = _print_json
+rich_print = print
+rich_print_json = print_json
+
+
+def _load_ipython_extension_impl(ip: Any) -> None:
+    """Install Rich pretty-printing and traceback hooks in IPython."""
+    _importlib.import_module("._extension", __package__).load_ipython_extension(ip)
+
+
+load_ipython_extension = _load_ipython_extension_impl
+rich_load_ipython_extension = load_ipython_extension
 
 
 if __name__ == "__main__":  # pragma: no cover

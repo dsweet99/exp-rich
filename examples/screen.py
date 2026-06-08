@@ -5,7 +5,7 @@ Demonstration of Console.screen()
 from time import sleep
 
 from rich.align import Align
-from rich.console import Console
+from rich._console_entry import Console
 from rich.panel import Panel
 
 console = Console()

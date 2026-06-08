@@ -135,9 +135,9 @@ def test_remove_color():
 
 
 def test_is_control():
-    assert Segment("foo", Style(bold=True)).is_control == False
-    assert Segment("foo", Style(bold=True), []).is_control == True
-    assert Segment("foo", Style(bold=True), [(ControlType.HOME, 0)]).is_control == True
+    assert not Segment("foo", Style(bold=True)).is_control
+    assert Segment("foo", Style(bold=True), []).is_control
+    assert Segment("foo", Style(bold=True), [(ControlType.HOME, 0)]).is_control
 
 
 def test_segments_renderable():
@@ -194,7 +194,7 @@ def test_divide_complex():
         "[on orange4]                        \n"
         "          [on green]XX[on orange4]          \n"
     )
-    from rich.console import Console
+    from rich._console_entry import Console
     from rich.text import Text
 
     text = Text.from_markup(MAP)

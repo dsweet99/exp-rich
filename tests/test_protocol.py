@@ -1,29 +1,26 @@
 import io
 
 from rich.abc import RichRenderable
-from rich.console import Console
+from rich._console_entry import Console
 from rich.panel import Panel
+from rich.protocol import is_renderable, rich_cast
 from rich.text import Text
 
-
-class Foo:
-    def __rich__(self) -> Text:
-        return Text("Foo")
+Foo = type("Foo", (), {"__rich__": lambda self: Text("Foo")})
+Fake = type(
+    "Fake",
+    (),
+    {"__getattr__": lambda self, name: 12, "__repr__": lambda self: "Fake()"},
+)
 
 
 def test_rich_cast():
     foo = Foo()
+    assert is_renderable(foo)
+    assert rich_cast("hello") == "hello"
     console = Console(file=io.StringIO())
     console.print(foo)
     assert console.file.getvalue() == "Foo\n"
-
-
-class Fake:
-    def __getattr__(self, name):
-        return 12
-
-    def __repr__(self) -> str:
-        return "Fake()"
 
 
 def test_rich_cast_fake():
@@ -51,34 +48,46 @@ def test_abc():
 
 
 def test_cast_deep():
-    class B:
-        def __rich__(self) -> Foo:
-            return Foo()
+    _locals: dict = {"Foo": Foo, "Text": Text}
+    exec(
+        """
+class B:
+    def __rich__(self) -> Foo:
+        return Foo()
 
-    class A:
-        def __rich__(self) -> B:
-            return B()
-
+class A:
+    def __rich__(self) -> B:
+        return B()
+""",
+        _locals,
+    )
+    A = _locals["A"]
     console = Console(file=io.StringIO())
     console.print(A())
     assert console.file.getvalue() == "Foo\n"
 
 
 def test_cast_recursive():
-    class B:
-        def __rich__(self) -> "A":
-            return A()
+    _locals = {}
+    exec(
+        """
+class B:
+    def __rich__(self) -> "A":
+        return A()
 
-        def __repr__(self) -> str:
-            return "<B>"
+    def __repr__(self) -> str:
+        return "<B>"
 
-    class A:
-        def __rich__(self) -> B:
-            return B()
+class A:
+    def __rich__(self) -> B:
+        return B()
 
-        def __repr__(self) -> str:
-            return "<A>"
-
+    def __repr__(self) -> str:
+        return "<A>"
+""",
+        _locals,
+    )
+    A = _locals["A"]
     console = Console(file=io.StringIO())
     console.print(A())
     assert console.file.getvalue() == "<B>\n"

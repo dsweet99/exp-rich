@@ -1,7 +1,6 @@
 from typing import List, Optional, Tuple
 
 from .color_triplet import ColorTriplet
-from .palette import Palette
 
 _ColorTuple = Tuple[int, int, int]
 
@@ -24,6 +23,9 @@ class TerminalTheme:
         normal: List[_ColorTuple],
         bright: Optional[List[_ColorTuple]] = None,
     ) -> None:
+        import importlib
+
+        Palette = importlib.import_module(".".join(["rich", "palette"])).Palette
         self.background_color = ColorTriplet(*background)
         self.foreground_color = ColorTriplet(*foreground)
         self.ansi_colors = Palette(normal + (bright or normal))

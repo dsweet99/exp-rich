@@ -42,14 +42,15 @@ def walk_directory(directory: pathlib.Path, tree: Tree) -> None:
             tree.add(Text(icon) + text_filename)
 
 
-try:
-    directory = os.path.abspath(sys.argv[1])
-except IndexError:
-    print("[b]Usage:[/] python tree.py <DIRECTORY>")
-else:
-    tree = Tree(
-        f":open_file_folder: [link file://{directory}]{directory}",
-        guide_style="bold bright_blue",
-    )
-    walk_directory(pathlib.Path(directory), tree)
-    print(tree)
+if __name__ == "__main__":
+    try:
+        directory = os.path.abspath(sys.argv[1])
+    except IndexError:
+        print("[b]Usage:[/] python tree.py <DIRECTORY>")
+    else:
+        tree = Tree(
+            f":open_file_folder: [link file://{directory}]{directory}",
+            guide_style="bold bright_blue",
+        )
+        walk_directory(pathlib.Path(directory), tree)
+        print(tree)

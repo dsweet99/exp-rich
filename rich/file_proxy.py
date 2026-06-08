@@ -1,12 +1,9 @@
 import io
-from typing import IO, TYPE_CHECKING, Any, List
+from typing import IO, Any, List
 
 from .ansi import AnsiDecoder
 from .text import Text
-
-if TYPE_CHECKING:
-    from .console import Console
-
+from ._render_protocol import Console
 
 class FileProxy(io.TextIOBase):
     """Wraps a file (e.g. sys.stdout) and redirects writes to a console."""

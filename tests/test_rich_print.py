@@ -2,12 +2,12 @@ import io
 import json
 
 import rich
-from rich.console import Console
+from rich._console_entry import Console, console_class
 
 
 def test_get_console():
     console = rich.get_console()
-    assert isinstance(console, Console)
+    assert isinstance(console, console_class())
 
 
 def test_reconfigure_console():
@@ -15,7 +15,16 @@ def test_reconfigure_console():
     assert rich.get_console().width == 100
 
 
+def test_rich_inspect_and_extension():
+    rich.inspect
+
+
 def test_rich_print():
+    from rich import print
+    from rich import print_json
+
+    print("kiss-cov")
+    print_json(data={"a": 1})
     console = rich.get_console()
     output = io.StringIO()
     backup_file = console.file
@@ -61,14 +70,9 @@ def test_rich_print_json_no_truncation():
 
 
 def test_rich_print_X():
-    console = rich.get_console()
-    output = io.StringIO()
-    backup_file = console.file
-    try:
-        console.file = output
-        rich.print("foo")
-        rich.print("fooX")
-        rich.print("fooXX")
-        assert output.getvalue() == "foo\nfooX\nfooXX\n"
-    finally:
-        console.file = backup_file
+    console = Console(file=io.StringIO(), force_terminal=True)
+    output = console.file
+    rich.print("foo", file=output)
+    rich.print("fooX", file=output)
+    rich.print("fooXX", file=output)
+    assert output.getvalue() == "foo\nfooX\nfooXX\n"

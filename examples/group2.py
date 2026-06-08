@@ -1,5 +1,5 @@
 from rich import print
-from rich.console import group
+from rich._console_entry import group
 from rich.panel import Panel
 
 
@@ -9,4 +9,5 @@ def get_panels():
     yield Panel("World", style="on red")
 
 
-print(Panel(get_panels()))
+if __name__ == "__main__":
+    print(Panel(get_panels()))

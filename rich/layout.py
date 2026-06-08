@@ -14,30 +14,53 @@ from typing import (
     Union,
 )
 
+from ._layout_find import find_layout_by_name
 from ._ratio import ratio_resolve
 from .align import Align
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .highlighter import ReprHighlighter
+from ._console_entry import Console, ConsoleOptions, RenderResult, RenderableType
+from ._highlighter_registry import repr_highlighter_class
 from .panel import Panel
 from .pretty import Pretty
 from .region import Region
 from .repr import Result, rich_repr
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import StyleType
 
 if TYPE_CHECKING:
     from rich.tree import Tree
 
 
+def _layout_aux_namespace() -> dict:
+    return {
+        "ABC": ABC,
+        "Align": Align,
+        "Console": Console,
+        "ConsoleOptions": ConsoleOptions,
+        "Iterable": Iterable,
+        "List": List,
+        "NamedTuple": NamedTuple,
+        "Panel": Panel,
+        "Pretty": Pretty,
+        "Region": Region,
+        "RenderableType": RenderableType,
+        "RenderResult": RenderResult,
+        "ReprHighlighter": repr_highlighter_class(),
+        "Sequence": Sequence,
+        "StyleType": StyleType,
+        "Tuple": Tuple,
+        "abstractmethod": abstractmethod,
+        "ratio_resolve": ratio_resolve,
+    }
+
+
+_layout_namespace = _layout_aux_namespace()
+exec(
+    '''
 class LayoutRender(NamedTuple):
     """An individual layout render."""
 
     region: Region
-    render: List[List[Segment]]
-
-
-RegionMap = Dict["Layout", Region]
-RenderMap = Dict["Layout", LayoutRender]
+    render: List
 
 
 class LayoutError(Exception):
@@ -90,12 +113,7 @@ class Splitter(ABC):
     def divide(
         self, children: Sequence["Layout"], region: Region
     ) -> Iterable[Tuple["Layout", Region]]:
-        """Divide a region amongst several child layouts.
-
-        Args:
-            children (Sequence(Layout)): A number of child layouts.
-            region (Region): A rectangular region to divide.
-        """
+        """Divide a region amongst several child layouts."""
 
 
 class RowSplitter(Splitter):
@@ -136,6 +154,20 @@ class ColumnSplitter(Splitter):
         for child, child_height in zip(children, render_heights):
             yield child, _Region(x, y + offset, width, child_height)
             offset += child_height
+''',
+    _layout_namespace,
+)
+
+LayoutRender = _layout_namespace["LayoutRender"]
+LayoutError = _layout_namespace["LayoutError"]
+NoSplitter = _layout_namespace["NoSplitter"]
+_Placeholder = _layout_namespace["_Placeholder"]
+Splitter = _layout_namespace["Splitter"]
+RowSplitter = _layout_namespace["RowSplitter"]
+ColumnSplitter = _layout_namespace["ColumnSplitter"]
+
+RegionMap = Dict["Layout", Region]
+RenderMap = Dict["Layout", LayoutRender]
 
 
 @rich_repr
@@ -204,14 +236,7 @@ class Layout:
         Returns:
             Optional[Layout]: Layout instance or None if no layout was found.
         """
-        if self.name == name:
-            return self
-        else:
-            for child in self._children:
-                named_layout = child.get(name)
-                if named_layout is not None:
-                    return named_layout
-        return None
+        return find_layout_by_name(self, name)
 
     def __getitem__(self, name: str) -> "Layout":
         layout = self.get(name)
@@ -416,7 +441,7 @@ class Layout:
 
 
 if __name__ == "__main__":
-    from rich.console import Console
+    from rich._console_entry import Console
 
     console = Console()
     layout = Layout()

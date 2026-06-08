@@ -4,7 +4,7 @@ import io
 
 from rich import box
 from rich.columns import Columns
-from rich.console import Console
+from rich._console_entry import Console
 from rich.panel import Panel
 
 

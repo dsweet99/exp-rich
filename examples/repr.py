@@ -13,7 +13,7 @@ class Bird:
 # Note that the repr is still generated without Rich
 # Try commenting out the following line
 
-from rich import print
+from rich import print  # noqa: E402
 
 BIRDS = {
     "gull": Bird("gull", eats=["fish", "chips", "ice cream", "sausage rolls"]),

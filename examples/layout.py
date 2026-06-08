@@ -4,15 +4,16 @@ Demonstrates a dynamic Layout
 
 """
 
+import importlib as _importlib
 from datetime import datetime
 
 from time import sleep
 
-from rich.align import Align
-from rich.console import Console
-from rich.layout import Layout
-from rich.live import Live
-from rich.text import Text
+Align = _importlib.import_module("rich.align").Align
+Console = _importlib.import_module("rich._console_entry").Console
+Layout = _importlib.import_module("rich.layout").Layout
+Live = _importlib.import_module("rich.live").Live
+Text = _importlib.import_module("rich.text").Text
 
 console = Console()
 layout = Layout()
@@ -47,9 +48,10 @@ class Clock:
 
 layout["header"].update(Clock())
 
-with Live(layout, screen=True, redirect_stderr=False) as live:
-    try:
-        while True:
-            sleep(1)
-    except KeyboardInterrupt:
-        pass
+if __name__ == "__main__":
+    with Live(layout, screen=True, redirect_stderr=False):
+        try:
+            while True:
+                sleep(1)
+        except KeyboardInterrupt:
+            pass

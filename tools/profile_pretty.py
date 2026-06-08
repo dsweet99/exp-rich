@@ -1,7 +1,7 @@
 import json
 import io
 from time import time
-from rich.console import Console
+from rich._console_entry import Console
 from rich.pretty import Pretty
 
 

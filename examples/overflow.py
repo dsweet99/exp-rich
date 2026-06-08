@@ -1,5 +1,5 @@
 from typing import List
-from rich.console import Console, OverflowMethod
+from rich._console_entry import Console, OverflowMethod
 
 console = Console(width=14)
 supercali = "supercalifragilisticexpialidocious"

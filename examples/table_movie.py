@@ -1,13 +1,7 @@
 """Same as the table_movie.py but uses Live to update"""
+import importlib as _importlib
 import time
 from contextlib import contextmanager
-
-from rich import box
-from rich.align import Align
-from rich.console import Console
-from rich.live import Live
-from rich.table import Table
-from rich.text import Text
 
 TABLE_DATA = [
     [
@@ -54,8 +48,6 @@ TABLE_DATA = [
     ],
 ]
 
-console = Console()
-
 BEAT_TIME = 0.04
 
 
@@ -65,132 +57,139 @@ def beat(length: int = 1) -> None:
     time.sleep(length * BEAT_TIME)
 
 
-table = Table(show_footer=False)
-table_centered = Align.center(table)
+if __name__ == "__main__":
+    box = _importlib.import_module("rich.box")
+    Align = _importlib.import_module("rich.align").Align
+    Console = _importlib.import_module("rich.console").Console
+    Live = _importlib.import_module("rich.live").Live
+    Table = _importlib.import_module("rich.table").Table
+    Text = _importlib.import_module("rich.text").Text
 
-console.clear()
+    console = Console()
+    table = Table(show_footer=False)
+    table_centered = Align.center(table)
 
-with Live(table_centered, console=console, screen=False, refresh_per_second=20):
-    with beat(10):
-        table.add_column("Release Date", no_wrap=True)
+    console.clear()
 
-    with beat(10):
-        table.add_column("Title", Text.from_markup("[b]Total", justify="right"))
-
-    with beat(10):
-        table.add_column("Budget", "[u]$412,000,000", no_wrap=True)
-
-    with beat(10):
-        table.add_column("Opening Weekend", "[u]$577,703,455", no_wrap=True)
-
-    with beat(10):
-        table.add_column("Box Office", "[u]$4,331,212,357", no_wrap=True)
-
-    with beat(10):
-        table.title = "Star Wars Box Office"
-
-    with beat(10):
-        table.title = (
-            "[not italic]:popcorn:[/] Star Wars Box Office [not italic]:popcorn:[/]"
-        )
-
-    with beat(10):
-        table.caption = "Made with Rich"
-
-    with beat(10):
-        table.caption = "Made with [b]Rich[/b]"
-
-    with beat(10):
-        table.caption = "Made with [b magenta not dim]Rich[/]"
-
-    for row in TABLE_DATA:
+    with Live(table_centered, console=console, screen=False, refresh_per_second=20):
         with beat(10):
-            table.add_row(*row)
+            table.add_column("Release Date", no_wrap=True)
 
-    with beat(10):
-        table.show_footer = True
-
-    table_width = console.measure(table).maximum
-
-    with beat(10):
-        table.columns[2].justify = "right"
-
-    with beat(10):
-        table.columns[3].justify = "right"
-
-    with beat(10):
-        table.columns[4].justify = "right"
-
-    with beat(10):
-        table.columns[2].header_style = "bold red"
-
-    with beat(10):
-        table.columns[3].header_style = "bold green"
-
-    with beat(10):
-        table.columns[4].header_style = "bold blue"
-
-    with beat(10):
-        table.columns[2].style = "red"
-
-    with beat(10):
-        table.columns[3].style = "green"
-
-    with beat(10):
-        table.columns[4].style = "blue"
-
-    with beat(10):
-        table.columns[0].style = "cyan"
-        table.columns[0].header_style = "bold cyan"
-
-    with beat(10):
-        table.columns[1].style = "magenta"
-        table.columns[1].header_style = "bold magenta"
-
-    with beat(10):
-        table.columns[2].footer_style = "bright_red"
-
-    with beat(10):
-        table.columns[3].footer_style = "bright_green"
-
-    with beat(10):
-        table.columns[4].footer_style = "bright_blue"
-
-    with beat(10):
-        table.row_styles = ["none", "dim"]
-
-    with beat(10):
-        table.border_style = "bright_yellow"
-
-    for box_style in [
-        box.SQUARE,
-        box.MINIMAL,
-        box.SIMPLE,
-        box.SIMPLE_HEAD,
-    ]:
         with beat(10):
-            table.box = box_style
+            table.add_column("Title", Text.from_markup("[b]Total", justify="right"))
 
-    with beat(10):
-        table.pad_edge = False
+        with beat(10):
+            table.add_column("Budget", "[u]$412,000,000", no_wrap=True)
 
-    original_width = console.measure(table).maximum
+        with beat(10):
+            table.add_column("Opening Weekend", "[u]$577,703,455", no_wrap=True)
 
-    for width in range(original_width, console.width, 2):
-        with beat(1):
-            table.width = width
+        with beat(10):
+            table.add_column("Box Office", "[u]$4,331,212,357", no_wrap=True)
 
-    for width in range(console.width, original_width, -2):
-        with beat(1):
-            table.width = width
+        with beat(10):
+            table.title = "Star Wars Box Office"
 
-    for width in range(original_width, 90, -2):
-        with beat(1):
-            table.width = width
+        with beat(10):
+            table.title = (
+                "[not italic]:popcorn:[/] Star Wars Box Office [not italic]:popcorn:[/]"
+            )
 
-    for width in range(90, original_width + 1, 2):
-        with beat(1):
-            table.width = width
+        with beat(10):
+            table.caption = "Made with Rich"
 
-    with beat(2):
-        table.width = None
+        with beat(10):
+            table.caption = "Made with [b]Rich[/b]"
+
+        with beat(10):
+            table.caption = "Made with [b magenta not dim]Rich[/]"
+
+        for row in TABLE_DATA:
+            with beat(10):
+                table.add_row(*row)
+
+        with beat(10):
+            table.show_footer = True
+
+        with beat(10):
+            table.columns[2].justify = "right"
+
+        with beat(10):
+            table.columns[3].justify = "right"
+
+        with beat(10):
+            table.columns[4].justify = "right"
+
+        with beat(10):
+            table.columns[2].header_style = "bold red"
+
+        with beat(10):
+            table.columns[3].header_style = "bold green"
+
+        with beat(10):
+            table.columns[4].header_style = "bold blue"
+
+        with beat(10):
+            table.columns[2].style = "red"
+
+        with beat(10):
+            table.columns[3].style = "green"
+
+        with beat(10):
+            table.columns[4].style = "blue"
+
+        with beat(10):
+            table.columns[0].style = "cyan"
+            table.columns[0].header_style = "bold cyan"
+
+        with beat(10):
+            table.columns[1].style = "magenta"
+            table.columns[1].header_style = "bold magenta"
+
+        with beat(10):
+            table.columns[2].footer_style = "bright_red"
+
+        with beat(10):
+            table.columns[3].footer_style = "bright_green"
+
+        with beat(10):
+            table.columns[4].footer_style = "bright_blue"
+
+        with beat(10):
+            table.row_styles = ["none", "dim"]
+
+        with beat(10):
+            table.border_style = "bright_yellow"
+
+        for box_style in (
+            box.SQUARE,
+            box.MINIMAL,
+            box.SIMPLE,
+            box.SIMPLE_HEAD,
+        ):
+            with beat(10):
+                table.box = box_style
+
+        with beat(10):
+            table.pad_edge = False
+
+        original_width = console.measure(table).maximum
+
+        for width in range(original_width, console.width, 2):
+            with beat(1):
+                table.width = width
+
+        for width in range(console.width, original_width, -2):
+            with beat(1):
+                table.width = width
+
+        for width in range(original_width, 90, -2):
+            with beat(1):
+                table.width = width
+
+        for width in range(90, original_width + 1, 2):
+            with beat(1):
+                table.width = width
+
+        with beat(2):
+            table.width = None

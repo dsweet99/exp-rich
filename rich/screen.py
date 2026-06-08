@@ -1,18 +1,8 @@
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
-from .segment import Segment
+from ._segment_proxy import Segment
 from .style import StyleType
 from ._loop import loop_last
-
-
-if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        RenderResult,
-        RenderableType,
-        Group,
-    )
 
 
 class Screen:
@@ -31,9 +21,9 @@ class Screen:
         style: Optional[StyleType] = None,
         application_mode: bool = False,
     ) -> None:
-        from rich.console import Group
+        from ._group_registry import group_class
 
-        self.renderable = Group(*renderables)
+        self.renderable = group_class()(*renderables)
         self.style = style
         self.application_mode = application_mode
 
@@ -52,3 +42,9 @@ class Screen:
             yield from line
             if not last:
                 yield new_line
+
+
+from ._screen_registry import register_screen  # noqa: E402
+from ._render_protocol import Console, ConsoleOptions, RenderResult, RenderableType  # noqa: E402
+
+register_screen(Screen)

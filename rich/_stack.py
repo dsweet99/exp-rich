@@ -3,7 +3,7 @@ from typing import List, TypeVar
 T = TypeVar("T")
 
 
-class Stack(List[T]):
+class _Stack(List[T]):
     """A small shim over builtin list."""
 
     @property
@@ -14,3 +14,6 @@ class Stack(List[T]):
     def push(self, item: T) -> None:
         """Push an item on to the stack (append in stack nomenclature)."""
         self.append(item)
+
+
+Stack = _Stack
