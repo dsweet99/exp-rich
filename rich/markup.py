@@ -103,7 +103,7 @@ def _parse(markup: str) -> Iterable[Tuple[int, Optional[str], Optional[Tag]]]:
         yield position, markup[position:], None
 
 
-def render(
+def _render_markup(
     markup: str,
     style: Union[str, Style] = "",
     emoji: bool = True,
@@ -229,6 +229,9 @@ def render(
 
     text.spans = sorted(spans[::-1], key=attrgetter("start"))
     return text
+
+
+render = _render_markup
 
 
 if __name__ == "__main__":  # pragma: no cover

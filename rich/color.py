@@ -518,10 +518,10 @@ class Color(NamedTuple):
         # Convert to 8-bit color from truecolor color
         if system == ColorSystem.EIGHT_BIT and self.system == ColorSystem.TRUECOLOR:
             assert self.triplet is not None
-            _h, l, s = rgb_to_hls(*self.triplet.normalized)
+            _h, lightness, s = rgb_to_hls(*self.triplet.normalized)
             # If saturation is under 15% assume it is grayscale
             if s < 0.15:
-                gray = round(l * 25.0)
+                gray = round(lightness * 25.0)
                 if gray == 0:
                     color_number = 16
                 elif gray == 25:

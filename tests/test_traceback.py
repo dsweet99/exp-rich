@@ -7,7 +7,7 @@ import pytest
 
 from rich.console import Console
 from rich.theme import Theme
-from rich.traceback import Traceback, install
+from rich.traceback import Traceback, _traceback_install
 
 
 def test_handler():
@@ -21,7 +21,7 @@ def test_handler():
         return 1 / 0
 
     try:
-        old_handler = install(console=console)
+        old_handler = _traceback_install(console=console)
         try:
             level1()
         except Exception:
@@ -70,7 +70,7 @@ def test_capture():
 
 def test_no_exception():
     with pytest.raises(ValueError):
-        tb = Traceback()
+        Traceback()
 
 
 def get_exception() -> Traceback:

@@ -2,6 +2,7 @@ import io
 import json
 
 import rich
+from rich import _print_json, _rich_print
 from rich.console import Console
 
 
@@ -32,7 +33,7 @@ def test_rich_print():
 def test_rich_print_json():
     console = rich.get_console()
     with console.capture() as capture:
-        rich.print_json('[false, true, null, "foo"]', indent=4)
+        _print_json('[false, true, null, "foo"]', indent=4)
     result = capture.get()
     print(repr(result))
     expected = '[\n    false,\n    true,\n    null,\n    "foo"\n]\n'
@@ -43,7 +44,7 @@ def test_rich_print_json_round_trip():
     data = ["x" * 100, 2e128]
     console = rich.get_console()
     with console.capture() as capture:
-        rich.print_json(data=data, indent=4)
+        _print_json(data=data, indent=4)
     result = capture.get()
     print(repr(result))
     result_data = json.loads(result)
@@ -53,7 +54,7 @@ def test_rich_print_json_round_trip():
 def test_rich_print_json_no_truncation():
     console = rich.get_console()
     with console.capture() as capture:
-        rich.print_json(f'["{"x" * 100}", {int(2e128)}]', indent=4)
+        _print_json(f'["{"x" * 100}", {int(2e128)}]', indent=4)
     result = capture.get()
     print(repr(result))
     assert ("x" * 100) in result
@@ -66,7 +67,7 @@ def test_rich_print_X():
     backup_file = console.file
     try:
         console.file = output
-        rich.print("foo")
+        _rich_print("foo")
         rich.print("fooX")
         rich.print("fooXX")
         assert output.getvalue() == "foo\nfooX\nfooXX\n"

@@ -867,7 +867,7 @@ def traverse(
             pop_visited(obj_id)
         else:
             node = Node(value_repr=to_repr(obj), last=root)
-        node.is_tuple = type(obj) == tuple
+        node.is_tuple = isinstance(obj, tuple)
         node.is_namedtuple = _is_namedtuple(obj)
         return node
 

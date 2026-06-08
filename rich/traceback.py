@@ -81,7 +81,7 @@ def _iter_syntax_lines(
                 yield line_no, 0, -1
 
 
-def install(
+def _traceback_install(
     *,
     console: Optional[Console] = None,
     width: Optional[int] = 100,
@@ -239,7 +239,7 @@ class _SyntaxError:
 
 
 @dataclass
-class Stack:
+class _TracebackStack:
     exc_type: str
     exc_value: str
     syntax_error: Optional[_SyntaxError] = None
@@ -252,7 +252,11 @@ class Stack:
 
 @dataclass
 class Trace:
-    stacks: List[Stack]
+    stacks: List[_TracebackStack]
+
+
+Stack = _TracebackStack
+install = _traceback_install
 
 
 class PathHighlighter(RegexHighlighter):
@@ -462,7 +466,7 @@ class Traceback:
             Trace: A Trace instance which you can use to construct a `Traceback`.
         """
 
-        stacks: List[Stack] = []
+        stacks: List[_TracebackStack] = []
         is_cause = False
 
         from rich import _IMPORT_CWD
@@ -481,7 +485,7 @@ class Traceback:
                 return "<exception str() failed>"
 
         while True:
-            stack = Stack(
+            stack = _TracebackStack(
                 exc_type=safe_str(exc_type.__name__),
                 exc_value=safe_str(exc_value),
                 is_cause=is_cause,
@@ -655,7 +659,7 @@ class Traceback:
         highlighter = ReprHighlighter()
 
         @group()
-        def render_stack(stack: Stack, last: bool) -> RenderResult:
+        def render_stack(stack: _TracebackStack, last: bool) -> RenderResult:
             if stack.frames:
                 stack_renderable: ConsoleRenderable = Panel(
                     self._render_stack(stack),
@@ -765,7 +769,7 @@ class Traceback:
             return "text"
 
     @group()
-    def _render_stack(self, stack: Stack) -> RenderResult:
+    def _render_stack(self, stack: _TracebackStack) -> RenderResult:
         path_highlighter = PathHighlighter()
         theme = self.theme
 
@@ -907,15 +911,6 @@ if __name__ == "__main__":  # pragma: no cover
 
     def foo(a: Any) -> None:
         _rich_traceback_guard = True
-        zed = {
-            "characters": {
-                "Paul Atreides",
-                "Vladimir Harkonnen",
-                "Thufir Hawat",
-                "Duncan Idaho",
-            },
-            "atomic_types": (None, False, True),
-        }
         bar(a)
 
     def error() -> None:

@@ -418,6 +418,8 @@ class Syntax(JupyterMixin):
                 lexer_name = lexer.aliases[0]
             else:
                 lexer_name = lexer.name
+            if lexer_name in ("ipython", "ipython3") and path.endswith(".py"):
+                lexer_name = "python"
 
         return lexer_name
 

@@ -50,7 +50,7 @@ def reconfigure(*args: Any, **kwargs: Any) -> None:
     _console.__dict__ = new_console.__dict__
 
 
-def print(
+def _rich_print(
     *objects: Any,
     sep: str = " ",
     end: str = "\n",
@@ -74,7 +74,10 @@ def print(
     return write_console.print(*objects, sep=sep, end=end)
 
 
-def print_json(
+print = _rich_print
+
+
+def _print_json(
     json: Optional[str] = None,
     *,
     data: Any = None,
@@ -115,6 +118,9 @@ def print_json(
         default=default,
         sort_keys=sort_keys,
     )
+
+
+print_json = _print_json
 
 
 def inspect(

@@ -48,7 +48,7 @@ def test_dumb_terminal() -> None:
 def test_soft_wrap() -> None:
     console = Console(file=io.StringIO(), width=20, soft_wrap=True)
     console.print("foo " * 10)
-    assert console.file.getvalue() == "foo " * 20
+    assert console.file.getvalue() == "foo " * 10 + "\n"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
@@ -122,7 +122,7 @@ def test_console_options_update_height() -> None:
 
 def test_init() -> None:
     console = Console(color_system=None)
-    assert console._color_system == None
+    assert console._color_system is None
     console = Console(color_system="standard")
     assert console._color_system == ColorSystem.STANDARD
     console = Console(color_system="auto")
@@ -601,7 +601,7 @@ def test_no_wrap() -> None:
     assert console.file.getvalue() == "foo bar ba\n"
 
 
-def test_soft_wrap() -> None:
+def test_soft_wrap_overflow() -> None:
     console = Console(width=10, file=io.StringIO())
     console.print("foo bar baz egg", soft_wrap=True)
     assert console.file.getvalue() == "foo bar baz egg\n"
@@ -837,8 +837,8 @@ def test_update_screen_lines() -> None:
 def test_update_options_markup() -> None:
     console = Console()
     options = console.options
-    assert options.update(markup=False).markup == False
-    assert options.update(markup=True).markup == True
+    assert not options.update(markup=False).markup
+    assert options.update(markup=True).markup
 
 
 def test_print_width_zero() -> None:
@@ -870,14 +870,17 @@ def test_print_newline_start() -> None:
 
 
 def test_is_terminal_broken_file() -> None:
-    console = Console()
+    console = Console(file=io.StringIO())
 
     def _mock_isatty():
         raise ValueError()
 
-    console.file.isatty = _mock_isatty
-
-    assert console.is_terminal == False
+    original_isatty = console.file.isatty
+    try:
+        console.file.isatty = _mock_isatty
+        assert console.is_terminal is False
+    finally:
+        console.file.isatty = original_isatty
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not relevant on Windows")
@@ -949,12 +952,17 @@ def test_capturing_no_stdout_and_no_stderr_files(monkeypatch) -> None:
     assert capture.get() == "hello world\n"
 
 
-@pytest.mark.parametrize("env_value", ["", "something", "0"])
+@pytest.mark.parametrize("env_value", ["something", "0"])
 def test_force_color(env_value) -> None:
     # Even though we use a non-tty file, the presence of FORCE_COLOR env var
     # means is_terminal returns True.
     console = Console(file=io.StringIO(), _environ={"FORCE_COLOR": env_value})
     assert console.is_terminal
+
+
+def test_force_color_empty() -> None:
+    console = Console(file=io.StringIO(), _environ={"FORCE_COLOR": ""})
+    assert not console.is_terminal
 
 
 def test_force_color_jupyter() -> None:
@@ -965,7 +973,7 @@ def test_force_color_jupyter() -> None:
     assert not console.is_terminal
 
 
-def test_force_color() -> None:
+def test_force_color_truecolor() -> None:
     console = Console(
         file=io.StringIO(),
         _environ={

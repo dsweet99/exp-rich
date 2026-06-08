@@ -95,7 +95,10 @@ def display(segments: Iterable[Segment], text: str) -> None:
         pass
 
 
-def print(*args: Any, **kwargs: Any) -> None:
+def _jupyter_print(*args: Any, **kwargs: Any) -> None:
     """Proxy for Console print."""
     console = get_console()
     return console.print(*args, **kwargs)
+
+
+print = _jupyter_print

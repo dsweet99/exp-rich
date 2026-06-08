@@ -18,16 +18,3 @@ class RichRenderable(ABC):
         return hasattr(other, "__rich_console__") or hasattr(other, "__rich__")
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from rich.text import Text
-
-    t = Text()
-    print(isinstance(Text, RichRenderable))
-    print(isinstance(t, RichRenderable))
-
-    class Foo:
-        pass
-
-    f = Foo()
-    print(isinstance(f, RichRenderable))
-    print(isinstance("", RichRenderable))

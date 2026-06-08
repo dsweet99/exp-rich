@@ -137,7 +137,7 @@ if sys.platform == "win32":
         assert first_kwargs["attributes"].value == expected_attr
 
     @patch.object(_win32_console, "SetConsoleTextAttribute")
-    def test_write_styled_reverse(
+    def test_write_styled_dim_bright_red(
         SetConsoleTextAttribute, win32_console_getters, win32_handle
     ):
         style = Style.parse("dim bright_red on blue")
