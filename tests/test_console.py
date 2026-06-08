@@ -870,7 +870,7 @@ def test_print_newline_start() -> None:
 
 
 def test_is_terminal_broken_file() -> None:
-    console = Console()
+    console = Console(file=io.StringIO())
 
     def _mock_isatty():
         raise ValueError()

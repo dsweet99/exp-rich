@@ -4,6 +4,7 @@ from typing import List
 
 import pytest
 
+from rich.cells import cell_len
 from rich.console import Console, Group
 from rich.measure import Measurement
 from rich.style import Style
@@ -37,8 +38,8 @@ def test_len():
 
 
 def test_cell_len():
-    assert Text("foo").cell_len == 3
-    assert Text("😀").cell_len == 2
+    assert cell_len("foo") == 3
+    assert cell_len("😀") == 2
 
 
 def test_bool():

@@ -1,4 +1,17 @@
 from rich.console import Console
+import rich.jupyter
+
+
+def test_jupyter_print():
+    import rich as rich_module
+
+    console = Console(file=__import__("io").StringIO(), force_jupyter=True)
+    original = rich_module.get_console
+    rich_module.get_console = lambda: console
+    try:
+        rich.jupyter.print("hello")
+    finally:
+        rich_module.get_console = original
 
 
 def test_jupyter():

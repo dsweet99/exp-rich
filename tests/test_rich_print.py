@@ -2,7 +2,20 @@ import io
 import json
 
 import rich
+from rich import print, print_json
 from rich.console import Console
+
+
+def test_rich_init_print_functions():
+    console = Console(file=io.StringIO(), width=80)
+    original = rich.get_console
+    rich.get_console = lambda: console
+    try:
+        print("direct")
+        print_json(data={"k": 1})
+    finally:
+        rich.get_console = original
+    assert "direct" in console.file.getvalue()
 
 
 def test_get_console():

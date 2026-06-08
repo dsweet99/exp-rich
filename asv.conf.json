@@ -29,6 +29,6 @@
     "3.10"
   ],
   "matrix": {
-    "setuptools": ["59.2.0"]
+    "setuptools": ["70.0.0"]
   }
 }

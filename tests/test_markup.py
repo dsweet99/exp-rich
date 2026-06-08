@@ -1,9 +1,14 @@
 import pytest
 
+import rich.markup
 from rich.console import Console
 from rich.errors import MarkupError
 from rich.markup import RE_TAGS, Tag, _parse, escape, render
 from rich.text import Span, Text
+
+
+def test_render_qualified_import():
+    assert rich.markup.render("hello").plain == "hello"
 
 
 def test_re_no_match():

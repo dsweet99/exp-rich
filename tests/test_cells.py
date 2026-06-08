@@ -31,6 +31,10 @@ def test_get_character_cell_size(character: str, size: int) -> None:
     assert get_character_cell_size(character) == size
 
 
+def test_cell_len_direct():
+    assert cell_len("xy") == 2
+
+
 def test_cell_len_long_string():
     # Long strings don't use cached cell length implementation
     assert cells.cell_len("abc" * 200) == 3 * 200
