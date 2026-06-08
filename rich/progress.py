@@ -5,7 +5,6 @@ import typing
 import warnings
 from abc import ABC, abstractmethod
 from collections import deque
-from dataclasses import dataclass, field
 from datetime import timedelta
 from io import RawIOBase, UnsupportedOperation
 from math import ceil
@@ -22,11 +21,9 @@ from typing import (
     ContextManager,
     Deque,
     Dict,
-    Generic,
     Iterable,
     List,
     Literal,
-    NamedTuple,
     NewType,
     Optional,
     TextIO,
@@ -40,10 +37,12 @@ if TYPE_CHECKING:
     # Can be replaced with `from typing import Self` in Python 3.11+
     from typing_extensions import Self  # pragma: no cover
 
-from . import filesize, get_console
+    from .highlighter import Highlighter
+
+from .filesize import decimal, pick_unit_and_suffix
+from .console import get_console
 from .console import Console, Group, JustifyMethod, RenderableType
-from .highlighter import Highlighter
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .live import Live
 from .progress_bar import ProgressBar
 from .spinner import Spinner
@@ -61,44 +60,58 @@ GetTimeCallable = Callable[[], float]
 _I = typing.TypeVar("_I", TextIO, BinaryIO)
 
 
-class _TrackThread(Thread):
-    """A thread to periodically update progress."""
 
-    def __init__(self, progress: "Progress", task_id: "TaskID", update_period: float):
-        self.progress = progress
-        self.task_id = task_id
-        self.update_period = update_period
-        self.done = Event()
+def _track_thread_init(
+    self, progress: "Progress", task_id: "TaskID", update_period: float
+) -> None:
+    self.progress = progress
+    self.task_id = task_id
+    self.update_period = update_period
+    self.done = Event()
+    self.completed = 0
+    Thread.__init__(self, daemon=True)
 
-        self.completed = 0
-        super().__init__(daemon=True)
 
-    def run(self) -> None:
-        task_id = self.task_id
-        advance = self.progress.advance
-        update_period = self.update_period
-        last_completed = 0
-        wait = self.done.wait
-        while not wait(update_period) and self.progress.live.is_started:
-            completed = self.completed
-            if last_completed != completed:
-                advance(task_id, completed - last_completed)
-                last_completed = completed
+def _track_thread_run(self) -> None:
+    task_id = self.task_id
+    advance = self.progress.advance
+    update_period = self.update_period
+    last_completed = 0
+    wait = self.done.wait
+    while not wait(update_period) and self.progress.live.is_started:
+        completed = self.completed
+        if last_completed != completed:
+            advance(task_id, completed - last_completed)
+            last_completed = completed
+    self.progress.update(self.task_id, completed=self.completed, refresh=True)
 
-        self.progress.update(self.task_id, completed=self.completed, refresh=True)
 
-    def __enter__(self) -> "_TrackThread":
-        self.start()
-        return self
+def _track_thread_enter(self) -> "_TrackThread":
+    self.start()
+    return self
 
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> None:
-        self.done.set()
-        self.join()
+
+def _track_thread_exit(
+    self,
+    exc_type: Optional[Type[BaseException]],
+    exc_val: Optional[BaseException],
+    exc_tb: Optional[TracebackType],
+) -> None:
+    self.done.set()
+    self.join()
+
+
+_TrackThread = type(
+    "_TrackThread",
+    (Thread,),
+    {
+        "__doc__": "A thread to periodically update progress.",
+        "__init__": _track_thread_init,
+        "run": _track_thread_run,
+        "__enter__": _track_thread_enter,
+        "__exit__": _track_thread_exit,
+    },
+)
 
 
 def track(
@@ -179,10 +192,9 @@ def track(
         )
 
 
-class _Reader(RawIOBase, BinaryIO):
-    """A reader that tracks progress while it's being read from."""
 
-    def __init__(
+
+def _reader__init__(
         self,
         handle: BinaryIO,
         progress: "Progress",
@@ -195,11 +207,13 @@ class _Reader(RawIOBase, BinaryIO):
         self.close_handle = close_handle
         self._closed = False
 
-    def __enter__(self) -> "_Reader":
+
+def _reader__enter__(self) -> "_Reader":
         self.handle.__enter__()
         return self
 
-    def __exit__(
+
+def _reader__exit__(
         self,
         exc_type: Optional[Type[BaseException]],
         exc_val: Optional[BaseException],
@@ -207,93 +221,108 @@ class _Reader(RawIOBase, BinaryIO):
     ) -> None:
         self.close()
 
-    def __iter__(self) -> BinaryIO:
+
+def _reader__iter__(self) -> BinaryIO:
         return self
 
-    def __next__(self) -> bytes:
+
+def _reader__next__(self) -> bytes:
         line = next(self.handle)
         self.progress.advance(self.task, advance=len(line))
         return line
 
-    @property
-    def closed(self) -> bool:
+
+def _reader_closed(self) -> bool:
         return self._closed
 
-    def fileno(self) -> int:
+
+def _reader_fileno(self) -> int:
         return self.handle.fileno()
 
-    def isatty(self) -> bool:
+
+def _reader_isatty(self) -> bool:
         return self.handle.isatty()
 
-    @property
-    def mode(self) -> str:
+
+def _reader_mode(self) -> str:
         return self.handle.mode
 
-    @property
-    def name(self) -> str:
+
+def _reader_name(self) -> str:
         return self.handle.name
 
-    def readable(self) -> bool:
+
+def _reader_readable(self) -> bool:
         return self.handle.readable()
 
-    def seekable(self) -> bool:
+
+def _reader_seekable(self) -> bool:
         return self.handle.seekable()
 
-    def writable(self) -> bool:
+
+def _reader_writable(self) -> bool:
         return False
 
-    def read(self, size: int = -1) -> bytes:
+
+def _reader_read(self, size: int = -1) -> bytes:
         block = self.handle.read(size)
         self.progress.advance(self.task, advance=len(block))
         return block
 
-    def readinto(self, b: Union[bytearray, memoryview, mmap]):  # type: ignore[no-untyped-def, override]
+
+def _reader_readinto(self, b: Union[bytearray, memoryview, mmap]):  # type: ignore[no-untyped-def, override]
         n = self.handle.readinto(b)  # type: ignore[attr-defined]
         self.progress.advance(self.task, advance=n)
         return n
 
-    def readline(self, size: int = -1) -> bytes:  # type: ignore[override]
+
+def _reader_readline(self, size: int = -1) -> bytes:  # type: ignore[override]
         line = self.handle.readline(size)
         self.progress.advance(self.task, advance=len(line))
         return line
 
-    def readlines(self, hint: int = -1) -> List[bytes]:
+
+def _reader_readlines(self, hint: int = -1) -> List[bytes]:
         lines = self.handle.readlines(hint)
         self.progress.advance(self.task, advance=sum(map(len, lines)))
         return lines
 
-    def close(self) -> None:
+
+def _reader_close(self) -> None:
         if self.close_handle:
             self.handle.close()
         self._closed = True
 
-    def seek(self, offset: int, whence: int = 0) -> int:
+
+def _reader_seek(self, offset: int, whence: int = 0) -> int:
         pos = self.handle.seek(offset, whence)
         self.progress.update(self.task, completed=pos)
         return pos
 
-    def tell(self) -> int:
+
+def _reader_tell(self) -> int:
         return self.handle.tell()
 
-    def write(self, s: Any) -> int:
+
+def _reader_write(self, s: Any) -> int:
         raise UnsupportedOperation("write")
 
-    def writelines(self, lines: Iterable[Any]) -> None:
+
+def _reader_writelines(self, lines: Iterable[Any]) -> None:
         raise UnsupportedOperation("writelines")
 
 
-class _ReadContext(ContextManager[_I], Generic[_I]):
-    """A utility class to handle a context for both a reader and a progress."""
-
-    def __init__(self, progress: "Progress", reader: _I) -> None:
+def _read_context__init__(self, progress: "Progress", reader: _I) -> None:
         self.progress = progress
         self.reader: _I = reader
 
-    def __enter__(self) -> _I:
+
+def _read_context__enter__(self) -> _I:
         self.progress.start()
         return self.reader.__enter__()
 
-    def __exit__(
+
+def _read_context__exit__(
         self,
         exc_type: Optional[Type[BaseException]],
         exc_val: Optional[BaseException],
@@ -301,6 +330,497 @@ class _ReadContext(ContextManager[_I], Generic[_I]):
     ) -> None:
         self.progress.stop()
         self.reader.__exit__(exc_type, exc_val, exc_tb)
+
+
+def _renderable_column__init__(
+        self, renderable: RenderableType = "", *, table_column: Optional[Column] = None
+    ):
+        self.renderable = renderable
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _renderable_column_render(self, task: "Task") -> RenderableType:
+        return self.renderable
+
+
+def _spinner_column__init__(
+        self,
+        spinner_name: str = "dots",
+        style: Optional[StyleType] = "progress.spinner",
+        speed: float = 1.0,
+        finished_text: TextType = " ",
+        table_column: Optional[Column] = None,
+    ):
+        self.spinner = Spinner(spinner_name, style=style, speed=speed)
+        self.finished_text = (
+            Text.from_markup(finished_text)
+            if isinstance(finished_text, str)
+            else finished_text
+        )
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _spinner_column_set_spinner(
+        self,
+        spinner_name: str,
+        spinner_style: Optional[StyleType] = "progress.spinner",
+        speed: float = 1.0,
+    ) -> None:
+        """Set a new spinner.
+
+        Args:
+            spinner_name (str): Spinner name, see python -m rich.spinner.
+            spinner_style (Optional[StyleType], optional): Spinner style. Defaults to "progress.spinner".
+            speed (float, optional): Speed factor of spinner. Defaults to 1.0.
+        """
+        self.spinner = Spinner(spinner_name, style=spinner_style, speed=speed)
+
+
+def _spinner_column_render(self, task: "Task") -> RenderableType:
+        text = (
+            self.finished_text
+            if task.finished
+            else self.spinner.render(task.get_time())
+        )
+        return text
+
+
+def _text_column__init__(
+        self,
+        text_format: str,
+        style: StyleType = "none",
+        justify: JustifyMethod = "left",
+        markup: bool = True,
+        highlighter: Optional[Highlighter] = None,
+        table_column: Optional[Column] = None,
+    ) -> None:
+        self.text_format = text_format
+        self.justify: JustifyMethod = justify
+        self.style = style
+        self.markup = markup
+        self.highlighter = highlighter
+        ProgressColumn.__init__(self, table_column=table_column or Column(no_wrap=True))
+
+
+def _text_column_render(self, task: "Task") -> Text:
+        _text = self.text_format.format(task=task)
+        if self.markup:
+            text = Text.from_markup(_text, style=self.style, justify=self.justify)
+        else:
+            text = Text(_text, style=self.style, justify=self.justify)
+        if self.highlighter:
+            self.highlighter.highlight(text)
+        return text
+
+
+def _bar_column__init__(
+        self,
+        bar_width: Optional[int] = 40,
+        style: StyleType = "bar.back",
+        complete_style: StyleType = "bar.complete",
+        finished_style: StyleType = "bar.finished",
+        pulse_style: StyleType = "bar.pulse",
+        table_column: Optional[Column] = None,
+    ) -> None:
+        self.bar_width = bar_width
+        self.style = style
+        self.complete_style = complete_style
+        self.finished_style = finished_style
+        self.pulse_style = pulse_style
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _bar_column_render(self, task: "Task") -> ProgressBar:
+        """Gets a progress bar widget for a task."""
+        return ProgressBar(
+            total=max(0, task.total) if task.total is not None else None,
+            completed=max(0, task.completed),
+            width=None if self.bar_width is None else max(1, self.bar_width),
+            pulse=not task.started,
+            animation_time=task.get_time(),
+            style=self.style,
+            complete_style=self.complete_style,
+            finished_style=self.finished_style,
+            pulse_style=self.pulse_style,
+        )
+
+
+def _time_elapsed_column_render(self, task: "Task") -> Text:
+        """Show time elapsed."""
+        elapsed = task.finished_time if task.finished else task.elapsed
+        if elapsed is None:
+            return Text("-:--:--", style="progress.elapsed")
+        delta = timedelta(seconds=max(0, int(elapsed)))
+        return Text(str(delta), style="progress.elapsed")
+
+
+def _task_progress_column__init__(
+        self,
+        text_format: str = "[progress.percentage]{task.percentage:>3.0f}%",
+        text_format_no_percentage: str = "",
+        style: StyleType = "none",
+        justify: JustifyMethod = "left",
+        markup: bool = True,
+        highlighter: Optional[Highlighter] = None,
+        table_column: Optional[Column] = None,
+        show_speed: bool = False,
+    ) -> None:
+        self.text_format_no_percentage = text_format_no_percentage
+        self.show_speed = show_speed
+        TextColumn.__init__(
+            self,
+            text_format=text_format,
+            style=style,
+            justify=justify,
+            markup=markup,
+            highlighter=highlighter,
+            table_column=table_column,
+        )
+
+
+def _task_progress_column_render_speed(cls, speed: Optional[float]) -> Text:
+        """Render the speed in iterations per second.
+
+        Args:
+            task (Task): A Task object.
+
+        Returns:
+            Text: Text object containing the task speed.
+        """
+        if speed is None:
+            return Text("", style="progress.percentage")
+        unit, suffix = pick_unit_and_suffix(
+            int(speed),
+            ["", "×10³", "×10⁶", "×10⁹", "×10¹²"],
+            1000,
+        )
+        data_speed = speed / unit
+        return Text(f"{data_speed:.1f}{suffix} it/s", style="progress.percentage")
+
+
+def _task_progress_column_render(self, task: "Task") -> Text:
+        if task.total is None and self.show_speed:
+            return self.render_speed(task.finished_speed or task.speed)
+        text_format = (
+            self.text_format_no_percentage if task.total is None else self.text_format
+        )
+        _text = text_format.format(task=task)
+        if self.markup:
+            text = Text.from_markup(_text, style=self.style, justify=self.justify)
+        else:
+            text = Text(_text, style=self.style, justify=self.justify)
+        if self.highlighter:
+            self.highlighter.highlight(text)
+        return text
+
+
+def _time_remaining_column__init__(
+        self,
+        compact: bool = False,
+        elapsed_when_finished: bool = False,
+        table_column: Optional[Column] = None,
+    ):
+        self.compact = compact
+        self.elapsed_when_finished = elapsed_when_finished
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _time_remaining_column_render(self, task: "Task") -> Text:
+        """Show time remaining."""
+        if self.elapsed_when_finished and task.finished:
+            task_time = task.finished_time
+            style = "progress.elapsed"
+        else:
+            task_time = task.time_remaining
+            style = "progress.remaining"
+
+        if task.total is None:
+            return Text("", style=style)
+
+        if task_time is None:
+            return Text("--:--" if self.compact else "-:--:--", style=style)
+
+        # Based on https://github.com/tqdm/tqdm/blob/master/tqdm/std.py
+        minutes, seconds = divmod(int(task_time), 60)
+        hours, minutes = divmod(minutes, 60)
+
+        if self.compact and not hours:
+            formatted = f"{minutes:02d}:{seconds:02d}"
+        else:
+            formatted = f"{hours:d}:{minutes:02d}:{seconds:02d}"
+
+        return Text(formatted, style=style)
+
+
+def _file_size_column_render(self, task: "Task") -> Text:
+        """Show data completed."""
+        data_size = decimal(int(task.completed))
+        return Text(data_size, style="progress.filesize")
+
+
+def _total_file_size_column_render(self, task: "Task") -> Text:
+        """Show data completed."""
+        data_size = decimal(int(task.total)) if task.total is not None else ""
+        return Text(data_size, style="progress.filesize.total")
+
+
+def _mof_n_complete_column__init__(self, separator: str = "/", table_column: Optional[Column] = None):
+        self.separator = separator
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _mof_n_complete_column_render(self, task: "Task") -> Text:
+        """Show completed/total."""
+        completed = int(task.completed)
+        total = int(task.total) if task.total is not None else "?"
+        total_width = len(str(total))
+        return Text(
+            f"{completed:{total_width}d}{self.separator}{total}",
+            style="progress.download",
+        )
+
+
+def _download_column__init__(
+        self, binary_units: bool = False, table_column: Optional[Column] = None
+    ) -> None:
+        self.binary_units = binary_units
+        ProgressColumn.__init__(self, table_column=table_column)
+
+
+def _download_column_render(self, task: "Task") -> Text:
+        """Calculate common unit for completed and total."""
+        completed = int(task.completed)
+
+        unit_and_suffix_calculation_base = (
+            int(task.total) if task.total is not None else completed
+        )
+        if self.binary_units:
+            unit, suffix = pick_unit_and_suffix(
+                unit_and_suffix_calculation_base,
+                ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"],
+                1024,
+            )
+        else:
+            unit, suffix = pick_unit_and_suffix(
+                unit_and_suffix_calculation_base,
+                ["bytes", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"],
+                1000,
+            )
+        precision = 0 if unit == 1 else 1
+
+        completed_ratio = completed / unit
+        completed_str = f"{completed_ratio:,.{precision}f}"
+
+        if task.total is not None:
+            total = int(task.total)
+            total_ratio = total / unit
+            total_str = f"{total_ratio:,.{precision}f}"
+        else:
+            total_str = "?"
+
+        download_status = f"{completed_str}/{total_str} {suffix}"
+        download_text = Text(download_status, style="progress.download")
+        return download_text
+
+
+def _transfer_speed_column_render(self, task: "Task") -> Text:
+        """Show data transfer speed."""
+        speed = task.finished_speed or task.speed
+        if speed is None:
+            return Text("?", style="progress.data.speed")
+        data_speed = decimal(int(speed))
+        return Text(f"{data_speed}/s", style="progress.data.speed")
+
+
+def _progress_sample__new__(cls, timestamp: float, completed: float):
+    return tuple.__new__(cls, (timestamp, completed))
+
+def _progress_sample_timestamp(self):
+    return self[0]
+
+def _progress_sample_completed(self):
+    return self[1]
+
+
+def _task__init__(
+    self,
+    id: TaskID,
+    description: str,
+    total: Optional[float],
+    completed: float,
+    _get_time: GetTimeCallable,
+    finished_time: Optional[float] = None,
+    visible: bool = True,
+    fields: Optional[Dict[str, Any]] = None,
+    finished_speed: Optional[float] = None,
+    _lock: Optional[RLock] = None,
+) -> None:
+    self.id = id
+    self.description = description
+    self.total = total
+    self.completed = completed
+    self._get_time = _get_time
+    self.finished_time = finished_time
+    self.visible = visible
+    self.fields = fields if fields is not None else {}
+    self.finished_speed = finished_speed
+    self.start_time = None
+    self.stop_time = None
+    self._progress: Deque[ProgressSample] = deque(maxlen=1000)
+    self._lock = _lock if _lock is not None else RLock()
+
+
+def _task_get_time(self) -> float:
+        """float: Get the current time, in seconds."""
+        return self._get_time()
+
+
+def _task_started(self) -> bool:
+        """bool: Check if the task as started."""
+        return self.start_time is not None
+
+
+def _task_remaining(self) -> Optional[float]:
+        """Optional[float]: Get the number of steps remaining, if a non-None total was set."""
+        if self.total is None:
+            return None
+        return self.total - self.completed
+
+
+def _task_elapsed(self) -> Optional[float]:
+        """Optional[float]: Time elapsed since task was started, or ``None`` if the task hasn't started."""
+        if self.start_time is None:
+            return None
+        if self.stop_time is not None:
+            return self.stop_time - self.start_time
+        return self.get_time() - self.start_time
+
+
+def _task_finished(self) -> bool:
+        """Check if the task has finished."""
+        return self.finished_time is not None
+
+
+def _task_percentage(self) -> float:
+        """float: Get progress of task as a percentage. If a None total was set, returns 0"""
+        if not self.total:
+            return 0.0
+        completed = (self.completed / self.total) * 100.0
+        completed = min(100.0, max(0.0, completed))
+        return completed
+
+
+def _task_speed(self) -> Optional[float]:
+        """Optional[float]: Get the estimated speed in steps per second."""
+        if self.start_time is None:
+            return None
+        with self._lock:
+            progress = self._progress
+            if not progress:
+                return None
+            total_time = progress[-1].timestamp - progress[0].timestamp
+            if total_time == 0:
+                return None
+            iter_progress = iter(progress)
+            next(iter_progress)
+            total_completed = sum(sample.completed for sample in iter_progress)
+            speed = total_completed / total_time
+            return speed
+
+
+def _task_time_remaining(self) -> Optional[float]:
+        """Optional[float]: Get estimated time to completion, or ``None`` if no data."""
+        if self.finished:
+            return 0.0
+        speed = self.speed
+        if not speed:
+            return None
+        remaining = self.remaining
+        if remaining is None:
+            return None
+        estimate = ceil(remaining / speed)
+        return estimate
+
+
+def _task__reset(self) -> None:
+        """Reset progress."""
+        self._progress.clear()
+        self.finished_time = None
+        self.finished_speed = None
+
+
+_Reader = type(
+    "_Reader",
+    (RawIOBase, BinaryIO),
+    {
+        "__doc__": "A reader that tracks progress while it's being read from.",
+        "__init__": _reader__init__,
+        "__enter__": _reader__enter__,
+        "__exit__": _reader__exit__,
+        "__iter__": _reader__iter__,
+        "__next__": _reader__next__,
+        "closed": property(_reader_closed),
+        "fileno": _reader_fileno,
+        "isatty": _reader_isatty,
+        "mode": property(_reader_mode),
+        "name": property(_reader_name),
+        "readable": _reader_readable,
+        "seekable": _reader_seekable,
+        "writable": _reader_writable,
+        "read": _reader_read,
+        "readinto": _reader_readinto,
+        "readline": _reader_readline,
+        "readlines": _reader_readlines,
+        "close": _reader_close,
+        "seek": _reader_seek,
+        "tell": _reader_tell,
+        "write": _reader_write,
+        "writelines": _reader_writelines
+    },
+)
+
+
+_ReadContext = type(
+    "_ReadContext",
+    (),
+    {
+        "__doc__": 'A utility class to handle a context for both a reader and a progress.',
+        "__init__": _read_context__init__,
+        "__enter__": _read_context__enter__,
+        "__exit__": _read_context__exit__
+    },
+)
+
+
+ProgressSample = type(
+    "ProgressSample",
+    (tuple,),
+    {
+        "__doc__": 'Number of steps completed.',
+        "__new__": _progress_sample__new__,
+        "timestamp": property(_progress_sample_timestamp),
+        "completed": property(_progress_sample_completed)
+    },
+)
+
+
+Task = type(
+    "Task",
+    (),
+    {
+        "get_time": _task_get_time,
+        "started": property(_task_started),
+        "remaining": property(_task_remaining),
+        "elapsed": property(_task_elapsed),
+        "finished": property(_task_finished),
+        "percentage": property(_task_percentage),
+        "speed": property(_task_speed),
+        "time_remaining": property(_task_time_remaining),
+        "_reset": _task__reset,
+        "__init__": _task__init__,
+        "__doc__": "Information regarding a progress task.",
+    },
+)
 
 
 def wrap_file(
@@ -504,6 +1024,22 @@ def open(
     return _ReadContext(progress, reader)  # type: ignore[return-value, type-var]
 
 
+
+def _progress_column_cached_renderable(
+    column: "ProgressColumn", task: "Task", current_time: float
+) -> Optional[RenderableType]:
+    """Return cached renderable if still fresh, else None."""
+    if column.max_refresh is None or task.completed:
+        return None
+    try:
+        timestamp, renderable = column._renderable_cache[task.id]
+    except KeyError:
+        return None
+    if timestamp + column.max_refresh > current_time:
+        return renderable
+    return None
+
+
 class ProgressColumn(ABC):
     """Base class for a widget to use in progress display."""
 
@@ -528,14 +1064,9 @@ class ProgressColumn(ABC):
             RenderableType: Anything renderable (including str).
         """
         current_time = task.get_time()
-        if self.max_refresh is not None and not task.completed:
-            try:
-                timestamp, renderable = self._renderable_cache[task.id]
-            except KeyError:
-                pass
-            else:
-                if timestamp + self.max_refresh > current_time:
-                    return renderable
+        cached = _progress_column_cached_renderable(self, task, current_time)
+        if cached is not None:
+            return cached
 
         renderable = self.render(task)
         self._renderable_cache[task.id] = (current_time, renderable)
@@ -546,516 +1077,180 @@ class ProgressColumn(ABC):
         """Should return a renderable object."""
 
 
-class RenderableColumn(ProgressColumn):
-    """A column to insert an arbitrary column.
 
-    Args:
-        renderable (RenderableType, optional): Any renderable. Defaults to empty string.
-    """
+RenderableColumn = type(
+    "RenderableColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'A column to insert an arbitrary column.\n\n    Args:\n        renderable (RenderableType, optional): Any renderable. Defaults to empty string.\n    ',
+        "__init__": _renderable_column__init__,
+        "render": _renderable_column_render
+    },
+)
 
-    def __init__(
-        self, renderable: RenderableType = "", *, table_column: Optional[Column] = None
+
+SpinnerColumn = type(
+    "SpinnerColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'A column with a \'spinner\' animation.\n\n    Args:\n        spinner_name (str, optional): Name of spinner animation. Defaults to "dots".\n        style (StyleType, optional): Style of spinner. Defaults to "progress.spinner".\n        speed (float, optional): Speed factor of spinner. Defaults to 1.0.\n        finished_text (TextType, optional): Text used when task is finished. Defaults to " ".\n    ',
+        "__init__": _spinner_column__init__,
+        "set_spinner": _spinner_column_set_spinner,
+        "render": _spinner_column_render
+    },
+)
+
+
+TextColumn = type(
+    "TextColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'A column containing text.',
+        "__init__": _text_column__init__,
+        "render": _text_column_render
+    },
+)
+
+
+BarColumn = type(
+    "BarColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders a visual progress bar.\n\n    Args:\n        bar_width (Optional[int], optional): Width of bar or None for full width. Defaults to 40.\n        style (StyleType, optional): Style for the bar background. Defaults to "bar.back".\n        complete_style (StyleType, optional): Style for the completed bar. Defaults to "bar.complete".\n        finished_style (StyleType, optional): Style for a finished bar. Defaults to "bar.finished".\n        pulse_style (StyleType, optional): Style for pulsing bars. Defaults to "bar.pulse".\n    ',
+        "__init__": _bar_column__init__,
+        "render": _bar_column_render
+    },
+)
+
+
+TimeElapsedColumn = type(
+    "TimeElapsedColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders time elapsed.',
+        "render": _time_elapsed_column_render
+    },
+)
+
+
+TaskProgressColumn = type(
+    "TaskProgressColumn",
+    (TextColumn,),
+    {
+        "__doc__": 'Show task progress as a percentage.\n\n    Args:\n        text_format (str, optional): Format for percentage display. Defaults to "[progress.percentage]{task.percentage:>3.0f}%".\n        text_format_no_percentage (str, optional): Format if percentage is unknown. Defaults to "".\n        style (StyleType, optional): Style of output. Defaults to "none".\n        justify (JustifyMethod, optional): Text justification. Defaults to "left".\n        markup (bool, optional): Enable markup. Defaults to True.\n        highlighter (Optional[Highlighter], optional): Highlighter to apply to output. Defaults to None.\n        table_column (Optional[Column], optional): Table Column to use. Defaults to None.\n        show_speed (bool, optional): Show speed if total is unknown. Defaults to False.\n    ',
+        "__init__": _task_progress_column__init__,
+        "render_speed": classmethod(_task_progress_column_render_speed),
+        "render": _task_progress_column_render
+    },
+)
+
+
+TimeRemainingColumn = type(
+    "TimeRemainingColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders estimated time remaining.\n\n    Args:\n        compact (bool, optional): Render MM:SS when time remaining is less than an hour. Defaults to False.\n        elapsed_when_finished (bool, optional): Render time elapsed when the task is finished. Defaults to False.\n    ',
+        "max_refresh": 0.5,
+        "__init__": _time_remaining_column__init__,
+        "render": _time_remaining_column_render
+    },
+)
+
+
+FileSizeColumn = type(
+    "FileSizeColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders completed filesize.',
+        "render": _file_size_column_render
+    },
+)
+
+
+TotalFileSizeColumn = type(
+    "TotalFileSizeColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders total filesize.',
+        "render": _total_file_size_column_render
+    },
+)
+
+
+MofNCompleteColumn = type(
+    "MofNCompleteColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders completed count/total, e.g. \'  10/1000\'.\n\n    Best for bounded tasks with int quantities.\n\n    Space pads the completed count so that progress length does not change as task progresses\n    past powers of 10.\n\n    Args:\n        separator (str, optional): Text to separate completed and total values. Defaults to "/".\n    ',
+        "__init__": _mof_n_complete_column__init__,
+        "render": _mof_n_complete_column_render
+    },
+)
+
+
+DownloadColumn = type(
+    "DownloadColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": "Renders file size downloaded and total, e.g. '0.5/2.3 GB'.\n\n    Args:\n        binary_units (bool, optional): Use binary units, KiB, MiB etc. Defaults to False.\n    ",
+        "__init__": _download_column__init__,
+        "render": _download_column_render
+    },
+)
+
+
+TransferSpeedColumn = type(
+    "TransferSpeedColumn",
+    (ProgressColumn,),
+    {
+        "__doc__": 'Renders human readable transfer speed.',
+        "render": _transfer_speed_column_render
+    },
+)
+
+def _normalize_progress_open_buffering(
+    mode: str, buffering: int
+) -> tuple[str, int, bool]:
+    """Normalize mode and buffering for Progress.open."""
+    _mode = "".join(sorted(mode, reverse=False))
+    if _mode not in ("br", "rt", "r"):
+        raise ValueError(f"invalid mode {mode!r}")
+
+    line_buffering = buffering == 1
+    if _mode == "br" and buffering == 1:
+        warnings.warn(
+            "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
+            RuntimeWarning,
+        )
+        buffering = -1
+    elif _mode in ("rt", "r"):
+        if buffering == 0:
+            raise ValueError("can't have unbuffered text I/O")
+        if buffering == 1:
+            buffering = -1
+    return _mode, buffering, line_buffering
+
+
+def _progress_update_speed_samples(
+    task: "Task",
+    update_completed: float,
+    current_time: float,
+    speed_estimate_period: float,
+) -> None:
+    """Update speed samples and finished time for a task."""
+    old_sample_time = current_time - speed_estimate_period
+    _progress = task._progress
+    popleft = _progress.popleft
+    while _progress and _progress[0].timestamp < old_sample_time:
+        popleft()
+    if update_completed > 0:
+        _progress.append(ProgressSample(current_time, update_completed))
+    if (
+        task.total is not None
+        and task.completed >= task.total
+        and task.finished_time is None
     ):
-        self.renderable = renderable
-        super().__init__(table_column=table_column)
-
-    def render(self, task: "Task") -> RenderableType:
-        return self.renderable
-
-
-class SpinnerColumn(ProgressColumn):
-    """A column with a 'spinner' animation.
-
-    Args:
-        spinner_name (str, optional): Name of spinner animation. Defaults to "dots".
-        style (StyleType, optional): Style of spinner. Defaults to "progress.spinner".
-        speed (float, optional): Speed factor of spinner. Defaults to 1.0.
-        finished_text (TextType, optional): Text used when task is finished. Defaults to " ".
-    """
-
-    def __init__(
-        self,
-        spinner_name: str = "dots",
-        style: Optional[StyleType] = "progress.spinner",
-        speed: float = 1.0,
-        finished_text: TextType = " ",
-        table_column: Optional[Column] = None,
-    ):
-        self.spinner = Spinner(spinner_name, style=style, speed=speed)
-        self.finished_text = (
-            Text.from_markup(finished_text)
-            if isinstance(finished_text, str)
-            else finished_text
-        )
-        super().__init__(table_column=table_column)
-
-    def set_spinner(
-        self,
-        spinner_name: str,
-        spinner_style: Optional[StyleType] = "progress.spinner",
-        speed: float = 1.0,
-    ) -> None:
-        """Set a new spinner.
-
-        Args:
-            spinner_name (str): Spinner name, see python -m rich.spinner.
-            spinner_style (Optional[StyleType], optional): Spinner style. Defaults to "progress.spinner".
-            speed (float, optional): Speed factor of spinner. Defaults to 1.0.
-        """
-        self.spinner = Spinner(spinner_name, style=spinner_style, speed=speed)
-
-    def render(self, task: "Task") -> RenderableType:
-        text = (
-            self.finished_text
-            if task.finished
-            else self.spinner.render(task.get_time())
-        )
-        return text
-
-
-class TextColumn(ProgressColumn):
-    """A column containing text."""
-
-    def __init__(
-        self,
-        text_format: str,
-        style: StyleType = "none",
-        justify: JustifyMethod = "left",
-        markup: bool = True,
-        highlighter: Optional[Highlighter] = None,
-        table_column: Optional[Column] = None,
-    ) -> None:
-        self.text_format = text_format
-        self.justify: JustifyMethod = justify
-        self.style = style
-        self.markup = markup
-        self.highlighter = highlighter
-        super().__init__(table_column=table_column or Column(no_wrap=True))
-
-    def render(self, task: "Task") -> Text:
-        _text = self.text_format.format(task=task)
-        if self.markup:
-            text = Text.from_markup(_text, style=self.style, justify=self.justify)
-        else:
-            text = Text(_text, style=self.style, justify=self.justify)
-        if self.highlighter:
-            self.highlighter.highlight(text)
-        return text
-
-
-class BarColumn(ProgressColumn):
-    """Renders a visual progress bar.
-
-    Args:
-        bar_width (Optional[int], optional): Width of bar or None for full width. Defaults to 40.
-        style (StyleType, optional): Style for the bar background. Defaults to "bar.back".
-        complete_style (StyleType, optional): Style for the completed bar. Defaults to "bar.complete".
-        finished_style (StyleType, optional): Style for a finished bar. Defaults to "bar.finished".
-        pulse_style (StyleType, optional): Style for pulsing bars. Defaults to "bar.pulse".
-    """
-
-    def __init__(
-        self,
-        bar_width: Optional[int] = 40,
-        style: StyleType = "bar.back",
-        complete_style: StyleType = "bar.complete",
-        finished_style: StyleType = "bar.finished",
-        pulse_style: StyleType = "bar.pulse",
-        table_column: Optional[Column] = None,
-    ) -> None:
-        self.bar_width = bar_width
-        self.style = style
-        self.complete_style = complete_style
-        self.finished_style = finished_style
-        self.pulse_style = pulse_style
-        super().__init__(table_column=table_column)
-
-    def render(self, task: "Task") -> ProgressBar:
-        """Gets a progress bar widget for a task."""
-        return ProgressBar(
-            total=max(0, task.total) if task.total is not None else None,
-            completed=max(0, task.completed),
-            width=None if self.bar_width is None else max(1, self.bar_width),
-            pulse=not task.started,
-            animation_time=task.get_time(),
-            style=self.style,
-            complete_style=self.complete_style,
-            finished_style=self.finished_style,
-            pulse_style=self.pulse_style,
-        )
-
-
-class TimeElapsedColumn(ProgressColumn):
-    """Renders time elapsed."""
-
-    def render(self, task: "Task") -> Text:
-        """Show time elapsed."""
-        elapsed = task.finished_time if task.finished else task.elapsed
-        if elapsed is None:
-            return Text("-:--:--", style="progress.elapsed")
-        delta = timedelta(seconds=max(0, int(elapsed)))
-        return Text(str(delta), style="progress.elapsed")
-
-
-class TaskProgressColumn(TextColumn):
-    """Show task progress as a percentage.
-
-    Args:
-        text_format (str, optional): Format for percentage display. Defaults to "[progress.percentage]{task.percentage:>3.0f}%".
-        text_format_no_percentage (str, optional): Format if percentage is unknown. Defaults to "".
-        style (StyleType, optional): Style of output. Defaults to "none".
-        justify (JustifyMethod, optional): Text justification. Defaults to "left".
-        markup (bool, optional): Enable markup. Defaults to True.
-        highlighter (Optional[Highlighter], optional): Highlighter to apply to output. Defaults to None.
-        table_column (Optional[Column], optional): Table Column to use. Defaults to None.
-        show_speed (bool, optional): Show speed if total is unknown. Defaults to False.
-    """
-
-    def __init__(
-        self,
-        text_format: str = "[progress.percentage]{task.percentage:>3.0f}%",
-        text_format_no_percentage: str = "",
-        style: StyleType = "none",
-        justify: JustifyMethod = "left",
-        markup: bool = True,
-        highlighter: Optional[Highlighter] = None,
-        table_column: Optional[Column] = None,
-        show_speed: bool = False,
-    ) -> None:
-        self.text_format_no_percentage = text_format_no_percentage
-        self.show_speed = show_speed
-        super().__init__(
-            text_format=text_format,
-            style=style,
-            justify=justify,
-            markup=markup,
-            highlighter=highlighter,
-            table_column=table_column,
-        )
-
-    @classmethod
-    def render_speed(cls, speed: Optional[float]) -> Text:
-        """Render the speed in iterations per second.
-
-        Args:
-            task (Task): A Task object.
-
-        Returns:
-            Text: Text object containing the task speed.
-        """
-        if speed is None:
-            return Text("", style="progress.percentage")
-        unit, suffix = filesize.pick_unit_and_suffix(
-            int(speed),
-            ["", "×10³", "×10⁶", "×10⁹", "×10¹²"],
-            1000,
-        )
-        data_speed = speed / unit
-        return Text(f"{data_speed:.1f}{suffix} it/s", style="progress.percentage")
-
-    def render(self, task: "Task") -> Text:
-        if task.total is None and self.show_speed:
-            return self.render_speed(task.finished_speed or task.speed)
-        text_format = (
-            self.text_format_no_percentage if task.total is None else self.text_format
-        )
-        _text = text_format.format(task=task)
-        if self.markup:
-            text = Text.from_markup(_text, style=self.style, justify=self.justify)
-        else:
-            text = Text(_text, style=self.style, justify=self.justify)
-        if self.highlighter:
-            self.highlighter.highlight(text)
-        return text
-
-
-class TimeRemainingColumn(ProgressColumn):
-    """Renders estimated time remaining.
-
-    Args:
-        compact (bool, optional): Render MM:SS when time remaining is less than an hour. Defaults to False.
-        elapsed_when_finished (bool, optional): Render time elapsed when the task is finished. Defaults to False.
-    """
-
-    # Only refresh twice a second to prevent jitter
-    max_refresh = 0.5
-
-    def __init__(
-        self,
-        compact: bool = False,
-        elapsed_when_finished: bool = False,
-        table_column: Optional[Column] = None,
-    ):
-        self.compact = compact
-        self.elapsed_when_finished = elapsed_when_finished
-        super().__init__(table_column=table_column)
-
-    def render(self, task: "Task") -> Text:
-        """Show time remaining."""
-        if self.elapsed_when_finished and task.finished:
-            task_time = task.finished_time
-            style = "progress.elapsed"
-        else:
-            task_time = task.time_remaining
-            style = "progress.remaining"
-
-        if task.total is None:
-            return Text("", style=style)
-
-        if task_time is None:
-            return Text("--:--" if self.compact else "-:--:--", style=style)
-
-        # Based on https://github.com/tqdm/tqdm/blob/master/tqdm/std.py
-        minutes, seconds = divmod(int(task_time), 60)
-        hours, minutes = divmod(minutes, 60)
-
-        if self.compact and not hours:
-            formatted = f"{minutes:02d}:{seconds:02d}"
-        else:
-            formatted = f"{hours:d}:{minutes:02d}:{seconds:02d}"
-
-        return Text(formatted, style=style)
-
-
-class FileSizeColumn(ProgressColumn):
-    """Renders completed filesize."""
-
-    def render(self, task: "Task") -> Text:
-        """Show data completed."""
-        data_size = filesize.decimal(int(task.completed))
-        return Text(data_size, style="progress.filesize")
-
-
-class TotalFileSizeColumn(ProgressColumn):
-    """Renders total filesize."""
-
-    def render(self, task: "Task") -> Text:
-        """Show data completed."""
-        data_size = filesize.decimal(int(task.total)) if task.total is not None else ""
-        return Text(data_size, style="progress.filesize.total")
-
-
-class MofNCompleteColumn(ProgressColumn):
-    """Renders completed count/total, e.g. '  10/1000'.
-
-    Best for bounded tasks with int quantities.
-
-    Space pads the completed count so that progress length does not change as task progresses
-    past powers of 10.
-
-    Args:
-        separator (str, optional): Text to separate completed and total values. Defaults to "/".
-    """
-
-    def __init__(self, separator: str = "/", table_column: Optional[Column] = None):
-        self.separator = separator
-        super().__init__(table_column=table_column)
-
-    def render(self, task: "Task") -> Text:
-        """Show completed/total."""
-        completed = int(task.completed)
-        total = int(task.total) if task.total is not None else "?"
-        total_width = len(str(total))
-        return Text(
-            f"{completed:{total_width}d}{self.separator}{total}",
-            style="progress.download",
-        )
-
-
-class DownloadColumn(ProgressColumn):
-    """Renders file size downloaded and total, e.g. '0.5/2.3 GB'.
-
-    Args:
-        binary_units (bool, optional): Use binary units, KiB, MiB etc. Defaults to False.
-    """
-
-    def __init__(
-        self, binary_units: bool = False, table_column: Optional[Column] = None
-    ) -> None:
-        self.binary_units = binary_units
-        super().__init__(table_column=table_column)
-
-    def render(self, task: "Task") -> Text:
-        """Calculate common unit for completed and total."""
-        completed = int(task.completed)
-
-        unit_and_suffix_calculation_base = (
-            int(task.total) if task.total is not None else completed
-        )
-        if self.binary_units:
-            unit, suffix = filesize.pick_unit_and_suffix(
-                unit_and_suffix_calculation_base,
-                ["bytes", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB", "ZiB", "YiB"],
-                1024,
-            )
-        else:
-            unit, suffix = filesize.pick_unit_and_suffix(
-                unit_and_suffix_calculation_base,
-                ["bytes", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"],
-                1000,
-            )
-        precision = 0 if unit == 1 else 1
-
-        completed_ratio = completed / unit
-        completed_str = f"{completed_ratio:,.{precision}f}"
-
-        if task.total is not None:
-            total = int(task.total)
-            total_ratio = total / unit
-            total_str = f"{total_ratio:,.{precision}f}"
-        else:
-            total_str = "?"
-
-        download_status = f"{completed_str}/{total_str} {suffix}"
-        download_text = Text(download_status, style="progress.download")
-        return download_text
-
-
-class TransferSpeedColumn(ProgressColumn):
-    """Renders human readable transfer speed."""
-
-    def render(self, task: "Task") -> Text:
-        """Show data transfer speed."""
-        speed = task.finished_speed or task.speed
-        if speed is None:
-            return Text("?", style="progress.data.speed")
-        data_speed = filesize.decimal(int(speed))
-        return Text(f"{data_speed}/s", style="progress.data.speed")
-
-
-class ProgressSample(NamedTuple):
-    """Sample of progress for a given time."""
-
-    timestamp: float
-    """Timestamp of sample."""
-    completed: float
-    """Number of steps completed."""
-
-
-@dataclass
-class Task:
-    """Information regarding a progress task.
-
-    This object should be considered read-only outside of the :class:`~Progress` class.
-
-    """
-
-    id: TaskID
-    """Task ID associated with this task (used in Progress methods)."""
-
-    description: str
-    """str: Description of the task."""
-
-    total: Optional[float]
-    """Optional[float]: Total number of steps in this task."""
-
-    completed: float
-    """float: Number of steps completed"""
-
-    _get_time: GetTimeCallable
-    """Callable to get the current time."""
-
-    finished_time: Optional[float] = None
-    """float: Time task was finished."""
-
-    visible: bool = True
-    """bool: Indicates if this task is visible in the progress display."""
-
-    fields: Dict[str, Any] = field(default_factory=dict)
-    """dict: Arbitrary fields passed in via Progress.update."""
-
-    start_time: Optional[float] = field(default=None, init=False, repr=False)
-    """Optional[float]: Time this task was started, or None if not started."""
-
-    stop_time: Optional[float] = field(default=None, init=False, repr=False)
-    """Optional[float]: Time this task was stopped, or None if not stopped."""
-
-    finished_speed: Optional[float] = None
-    """Optional[float]: The last speed for a finished task."""
-
-    _progress: Deque[ProgressSample] = field(
-        default_factory=lambda: deque(maxlen=1000), init=False, repr=False
-    )
-
-    _lock: RLock = field(repr=False, default_factory=RLock)
-    """Thread lock."""
-
-    def get_time(self) -> float:
-        """float: Get the current time, in seconds."""
-        return self._get_time()
-
-    @property
-    def started(self) -> bool:
-        """bool: Check if the task as started."""
-        return self.start_time is not None
-
-    @property
-    def remaining(self) -> Optional[float]:
-        """Optional[float]: Get the number of steps remaining, if a non-None total was set."""
-        if self.total is None:
-            return None
-        return self.total - self.completed
-
-    @property
-    def elapsed(self) -> Optional[float]:
-        """Optional[float]: Time elapsed since task was started, or ``None`` if the task hasn't started."""
-        if self.start_time is None:
-            return None
-        if self.stop_time is not None:
-            return self.stop_time - self.start_time
-        return self.get_time() - self.start_time
-
-    @property
-    def finished(self) -> bool:
-        """Check if the task has finished."""
-        return self.finished_time is not None
-
-    @property
-    def percentage(self) -> float:
-        """float: Get progress of task as a percentage. If a None total was set, returns 0"""
-        if not self.total:
-            return 0.0
-        completed = (self.completed / self.total) * 100.0
-        completed = min(100.0, max(0.0, completed))
-        return completed
-
-    @property
-    def speed(self) -> Optional[float]:
-        """Optional[float]: Get the estimated speed in steps per second."""
-        if self.start_time is None:
-            return None
-        with self._lock:
-            progress = self._progress
-            if not progress:
-                return None
-            total_time = progress[-1].timestamp - progress[0].timestamp
-            if total_time == 0:
-                return None
-            iter_progress = iter(progress)
-            next(iter_progress)
-            total_completed = sum(sample.completed for sample in iter_progress)
-            speed = total_completed / total_time
-            return speed
-
-    @property
-    def time_remaining(self) -> Optional[float]:
-        """Optional[float]: Get estimated time to completion, or ``None`` if no data."""
-        if self.finished:
-            return 0.0
-        speed = self.speed
-        if not speed:
-            return None
-        remaining = self.remaining
-        if remaining is None:
-            return None
-        estimate = ceil(remaining / speed)
-        return estimate
-
-    def _reset(self) -> None:
-        """Reset progress."""
-        self._progress.clear()
-        self.finished_time = None
-        self.finished_speed = None
+        task.finished_time = task.elapsed
 
 
 class Progress(JupyterMixin):
@@ -1265,7 +1460,7 @@ class Progress(JupyterMixin):
                 total_bytes = self._tasks[task_id].total
         if total_bytes is None:
             raise ValueError(
-                f"unable to get the total number of bytes, please specify 'total'"
+                "unable to get the total number of bytes, please specify 'total'"
             )
 
         # update total of task or create new task
@@ -1340,24 +1535,9 @@ class Progress(JupyterMixin):
         Raises:
             ValueError: When an invalid mode is given.
         """
-        # normalize the mode (always rb, rt)
-        _mode = "".join(sorted(mode, reverse=False))
-        if _mode not in ("br", "rt", "r"):
-            raise ValueError(f"invalid mode {mode!r}")
-
-        # patch buffering to provide the same behaviour as the builtin `open`
-        line_buffering = buffering == 1
-        if _mode == "br" and buffering == 1:
-            warnings.warn(
-                "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
-                RuntimeWarning,
-            )
-            buffering = -1
-        elif _mode in ("rt", "r"):
-            if buffering == 0:
-                raise ValueError("can't have unbuffered text I/O")
-            elif buffering == 1:
-                buffering = -1
+        _mode, buffering, line_buffering = _normalize_progress_open_buffering(
+            mode, buffering
+        )
 
         # attempt to get the total with `os.stat`
         if total is None:
@@ -1455,22 +1635,9 @@ class Progress(JupyterMixin):
                 task.visible = visible
             task.fields.update(fields)
             update_completed = task.completed - completed_start
-
-            current_time = self.get_time()
-            old_sample_time = current_time - self.speed_estimate_period
-            _progress = task._progress
-
-            popleft = _progress.popleft
-            while _progress and _progress[0].timestamp < old_sample_time:
-                popleft()
-            if update_completed > 0:
-                _progress.append(ProgressSample(current_time, update_completed))
-            if (
-                task.total is not None
-                and task.completed >= task.total
-                and task.finished_time is None
-            ):
-                task.finished_time = task.elapsed
+            _progress_update_speed_samples(
+                task, update_completed, self.get_time(), self.speed_estimate_period
+            )
 
         if refresh:
             self.refresh()

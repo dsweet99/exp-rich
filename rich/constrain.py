@@ -1,10 +1,13 @@
+from __future__ import annotations
+
 from typing import Optional, TYPE_CHECKING
 
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType, RenderResult
+    from ._types import Console, ConsoleOptions, RenderResult, RenderableType
+
 
 
 class Constrain(JupyterMixin):

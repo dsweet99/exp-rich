@@ -1,21 +1,16 @@
-import time
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Union, Final
+from __future__ import annotations
 
+import time
+from typing import Callable, Dict, Iterable, List, Union, Final, TYPE_CHECKING
+
+from ._control_strip import STRIP_CONTROL_CODES, strip_control_codes
+
+__all__ = ["Control", "ControlCode", "ControlType", "Segment", "STRIP_CONTROL_CODES", "strip_control_codes", "escape_control_codes"]
 from .segment import ControlCode, ControlType, Segment
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
+    from ._types import Console, ConsoleOptions, RenderResult
 
-STRIP_CONTROL_CODES: Final = [
-    7,  # Bell
-    8,  # Backspace
-    11,  # Vertical tab
-    12,  # Form feed
-    13,  # Carriage return
-]
-_CONTROL_STRIP_TRANSLATE: Final = {
-    _codepoint: None for _codepoint in STRIP_CONTROL_CODES
-}
 
 CONTROL_ESCAPE: Final = {
     7: "\\a",
@@ -44,7 +39,6 @@ CONTROL_CODES_FORMAT: Dict[int, Callable[..., str]] = {
     ControlType.SET_WINDOW_TITLE: lambda title: f"\x1b]0;{title}\x07",
 }
 
-
 class Control:
     """A renderable that inserts a control code (non printable but may move cursor).
 
@@ -57,7 +51,7 @@ class Control:
 
     def __init__(self, *codes: Union[ControlType, ControlCode]) -> None:
         control_codes: List[ControlCode] = [
-            (code,) if isinstance(code, ControlType) else code for code in codes
+            (code,) if not isinstance(code, tuple) else code for code in codes
         ]
         _format_map = CONTROL_CODES_FORMAT
         rendered_codes = "".join(
@@ -177,21 +171,6 @@ class Control:
         if self.segment.text:
             yield self.segment
 
-
-def strip_control_codes(
-    text: str, _translate_table: Dict[int, None] = _CONTROL_STRIP_TRANSLATE
-) -> str:
-    """Remove control codes from text.
-
-    Args:
-        text (str): A string possibly contain control codes.
-
-    Returns:
-        str: String with control codes removed.
-    """
-    return text.translate(_translate_table)
-
-
 def escape_control_codes(
     text: str,
     _translate_table: Dict[int, str] = CONTROL_ESCAPE,
@@ -207,11 +186,10 @@ def escape_control_codes(
     """
     return text.translate(_translate_table)
 
-
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+    from ._pick import M_CONSOLE, rich_module
 
-    console = Console()
+    console = rich_module(M_CONSOLE).Console()
     console.print("Look at the title of your terminal window ^")
     # console.print(Control((ControlType.SET_WINDOW_TITLE, "Hello, world!")))
     for i in range(10):

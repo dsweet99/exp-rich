@@ -1,4 +1,5 @@
-from enum import IntEnum
+from __future__ import annotations
+
 from functools import lru_cache
 from itertools import filterfalse
 from operator import attrgetter
@@ -15,9 +16,9 @@ from typing import (
     Union,
 )
 
+from ._segment_divide import divide_segments
 from .cells import (
     _is_single_cell_widths,
-    cached_cell_len,
     cell_len,
     get_character_cell_size,
     set_cell_size,
@@ -26,29 +27,32 @@ from .repr import Result, rich_repr
 from .style import Style
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
+    from ._types import ConsoleOptions, RenderResult
 
 
-class ControlType(IntEnum):
-    """Non-printable control codes which typically translate to ANSI codes."""
-
-    BELL = 1
-    CARRIAGE_RETURN = 2
-    HOME = 3
-    CLEAR = 4
-    SHOW_CURSOR = 5
-    HIDE_CURSOR = 6
-    ENABLE_ALT_SCREEN = 7
-    DISABLE_ALT_SCREEN = 8
-    CURSOR_UP = 9
-    CURSOR_DOWN = 10
-    CURSOR_FORWARD = 11
-    CURSOR_BACKWARD = 12
-    CURSOR_MOVE_TO_COLUMN = 13
-    CURSOR_MOVE_TO = 14
-    ERASE_IN_LINE = 15
-    SET_WINDOW_TITLE = 16
-
+ControlType = type(
+    "ControlType",
+    (),
+    {
+        "__doc__": "Non-printable control codes which typically translate to ANSI codes.",
+        "BELL": 1,
+        "CARRIAGE_RETURN": 2,
+        "HOME": 3,
+        "CLEAR": 4,
+        "SHOW_CURSOR": 5,
+        "HIDE_CURSOR": 6,
+        "ENABLE_ALT_SCREEN": 7,
+        "DISABLE_ALT_SCREEN": 8,
+        "CURSOR_UP": 9,
+        "CURSOR_DOWN": 10,
+        "CURSOR_FORWARD": 11,
+        "CURSOR_BACKWARD": 12,
+        "CURSOR_MOVE_TO_COLUMN": 13,
+        "CURSOR_MOVE_TO": 14,
+        "ERASE_IN_LINE": 15,
+        "SET_WINDOW_TITLE": 16,
+    },
+)
 
 ControlCode = Union[
     Tuple[ControlType],
@@ -56,6 +60,69 @@ ControlCode = Union[
     Tuple[ControlType, int, int],
 ]
 
+def _segment_newline_parts(
+    cls: Type["Segment"], segment: "Segment"
+) -> Iterable[Optional["Segment"]]:
+    """Yield segment parts; ``None`` marks a newline boundary."""
+    if "\n" not in segment.text or segment.control:
+        yield segment
+        return
+    text, style, _ = segment
+    while text:
+        part, new_line, text = text.partition("\n")
+        if part:
+            yield cls(part, style)
+        if new_line:
+            yield None
+
+def _segment_pad_line(
+    cls: Type["Segment"], line: List["Segment"], length: int, style: Optional[Style]
+) -> List["Segment"]:
+    line_length = sum(segment.cell_length for segment in line)
+    return line + [cls(" " * (length - line_length), style)]
+
+def _segment_crop_line(
+    cls: Type["Segment"], line: List["Segment"], length: int
+) -> List["Segment"]:
+    new_line: List["Segment"] = []
+    append = new_line.append
+    line_length = 0
+    for segment in line:
+        segment_length = segment.cell_length
+        if line_length + segment_length < length or segment.control:
+            append(segment)
+            line_length += segment_length
+            continue
+        text, segment_style, _ = segment
+        append(cls(set_cell_size(text, length - line_length), segment_style))
+        break
+    return new_line
+
+def _collect_split_line_part(
+    cls: Type["Segment"],
+    line: List["Segment"],
+    part: Optional["Segment"],
+) -> List["Segment"]:
+    """Append a segment part to *line*, or return a fresh line on newline boundaries."""
+    if part is None:
+        return []
+    line.append(part)
+    return line
+
+def _collect_split_lines(
+    cls: Type["Segment"], segments: Iterable["Segment"]
+) -> Iterable[Tuple[List["Segment"], Optional[bool]]]:
+    """Yield (line, newline_flag) while splitting segments on newlines."""
+    line: List["Segment"] = []
+    for segment in segments:
+        for part in _segment_newline_parts(cls, segment):
+            if part is None:
+                yield line, True
+                line = []
+                continue
+            line = _collect_split_line_part(cls, line, part)
+    if line:
+        yield line, None
 
 @rich_repr()
 class Segment(NamedTuple):
@@ -253,23 +320,7 @@ class Segment(NamedTuple):
         Yields:
             Iterable[List[Segment]]: Iterable of segment lists, one per line.
         """
-        line: List[Segment] = []
-        append = line.append
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield line
-                        line = []
-                        append = line.append
-            else:
-                append(segment)
-        if line:
+        for line, _newline in _collect_split_lines(cls, segments):
             yield line
 
     @classmethod
@@ -284,24 +335,11 @@ class Segment(NamedTuple):
         Yields:
             Iterable[List[Segment]]: Iterable of segment lists, one per line.
         """
-        line: List[Segment] = []
-        append = line.append
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield (line, True)
-                        line = []
-                        append = line.append
+        for line, newline in _collect_split_lines(cls, segments):
+            if newline is None:
+                yield (line, False)
             else:
-                append(segment)
-        if line:
-            yield (line, False)
+                yield (line, True)
 
     @classmethod
     def split_and_crop_lines(
@@ -324,31 +362,16 @@ class Segment(NamedTuple):
         Returns:
             Iterable[List[Segment]]: An iterable of lines of segments.
         """
-        line: List[Segment] = []
-        append = line.append
-
         adjust_line_length = cls.adjust_line_length
         new_line_segment = cls("\n")
-
-        for segment in segments:
-            if "\n" in segment.text and not segment.control:
-                text, segment_style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, segment_style))
-                    if new_line:
-                        cropped_line = adjust_line_length(
-                            line, length, style=style, pad=pad
-                        )
-                        if include_new_lines:
-                            cropped_line.append(new_line_segment)
-                        yield cropped_line
-                        line.clear()
-            else:
-                append(segment)
-        if line:
-            yield adjust_line_length(line, length, style=style, pad=pad)
+        for line, newline in _collect_split_lines(cls, segments):
+            if newline is None:
+                yield adjust_line_length(line, length, style=style, pad=pad)
+                continue
+            cropped_line = adjust_line_length(line, length, style=style, pad=pad)
+            if include_new_lines:
+                cropped_line.append(new_line_segment)
+            yield cropped_line
 
     @classmethod
     def adjust_line_length(
@@ -370,30 +393,13 @@ class Segment(NamedTuple):
             List[Segment]: A line of segments with the desired length.
         """
         line_length = sum(segment.cell_length for segment in line)
-        new_line: List[Segment]
-
         if line_length < length:
             if pad:
-                new_line = line + [cls(" " * (length - line_length), style)]
-            else:
-                new_line = line[:]
-        elif line_length > length:
-            new_line = []
-            append = new_line.append
-            line_length = 0
-            for segment in line:
-                segment_length = segment.cell_length
-                if line_length + segment_length < length or segment.control:
-                    append(segment)
-                    line_length += segment_length
-                else:
-                    text, segment_style, _ = segment
-                    text = set_cell_size(text, length - line_length)
-                    append(cls(text, segment_style))
-                    break
-        else:
-            new_line = line[:]
-        return new_line
+                return _segment_pad_line(cls, line, length, style)
+            return line[:]
+        if line_length > length:
+            return _segment_crop_line(cls, line, length)
+        return line[:]
 
     @classmethod
     def get_line_length(cls, line: List["Segment"]) -> int:
@@ -638,123 +644,76 @@ class Segment(NamedTuple):
         Yields:
             [Iterable[List[Segment]]]: An iterable of Segments in List.
         """
-        split_segments: List["Segment"] = []
-        add_segment = split_segments.append
+        return divide_segments(cls, segments, cuts)
 
-        iter_cuts = iter(cuts)
+def _segments_rich_console(
+    self, console: "Console", options: "ConsoleOptions"
+) -> "RenderResult":
+    if self.new_lines:
+        line = Segment.line()
+        for segment in self.segments:
+            yield segment
+            yield line
+    else:
+        yield from self.segments
 
-        while True:
-            cut = next(iter_cuts, -1)
-            if cut == -1:
-                return
-            if cut != 0:
-                break
-            yield []
-        pos = 0
+def _segments_init(self, segments: Iterable["Segment"], new_lines: bool = False) -> None:
+    self.segments = list(segments)
+    self.new_lines = new_lines
 
-        segments_clear = split_segments.clear
-        segments_copy = split_segments.copy
+def _segment_lines_init(
+    self, lines: Iterable[List["Segment"]], new_lines: bool = False
+) -> None:
+    self.lines = list(lines)
+    self.new_lines = new_lines
 
-        _cell_len = cached_cell_len
-        for segment in segments:
-            text, _style, control = segment
-            while text:
-                end_pos = pos if control else pos + _cell_len(text)
-                if end_pos < cut:
-                    add_segment(segment)
-                    pos = end_pos
-                    break
+def _segment_lines_rich_console(
+    self, console: "Console", options: "ConsoleOptions"
+) -> "RenderResult":
+    if self.new_lines:
+        new_line = Segment.line()
+        for line in self.lines:
+            yield from line
+            yield new_line
+    else:
+        for line in self.lines:
+            yield from line
 
-                if end_pos == cut:
-                    add_segment(segment)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = end_pos
+Segments = type(
+    "Segments",
+    (),
+    {
+        "__doc__": "A simple renderable to render an iterable of segments.",
+        "__init__": _segments_init,
+        "__rich_console__": _segments_rich_console,
+    },
+)
 
-                    cut = next(iter_cuts, -1)
-                    if cut == -1:
-                        if split_segments:
-                            yield segments_copy()
-                        return
-
-                    break
-
-                else:
-                    before, segment = segment.split_cells(cut - pos)
-                    text, _style, control = segment
-                    add_segment(before)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = cut
-
-                cut = next(iter_cuts, -1)
-                if cut == -1:
-                    if split_segments:
-                        yield segments_copy()
-                    return
-
-        yield segments_copy()
-
-
-class Segments:
-    """A simple renderable to render an iterable of segments. This class may be useful if
-    you want to print segments outside of a __rich_console__ method.
-
-    Args:
-        segments (Iterable[Segment]): An iterable of segments.
-        new_lines (bool, optional): Add new lines between segments. Defaults to False.
-    """
-
-    def __init__(self, segments: Iterable[Segment], new_lines: bool = False) -> None:
-        self.segments = list(segments)
-        self.new_lines = new_lines
-
-    def __rich_console__(
-        self, console: "Console", options: "ConsoleOptions"
-    ) -> "RenderResult":
-        if self.new_lines:
-            line = Segment.line()
-            for segment in self.segments:
-                yield segment
-                yield line
-        else:
-            yield from self.segments
-
-
-class SegmentLines:
-    def __init__(self, lines: Iterable[List[Segment]], new_lines: bool = False) -> None:
-        """A simple renderable containing a number of lines of segments. May be used as an intermediate
-        in rendering process.
-
-        Args:
-            lines (Iterable[List[Segment]]): Lists of segments forming lines.
-            new_lines (bool, optional): Insert new lines after each line. Defaults to False.
-        """
-        self.lines = list(lines)
-        self.new_lines = new_lines
-
-    def __rich_console__(
-        self, console: "Console", options: "ConsoleOptions"
-    ) -> "RenderResult":
-        if self.new_lines:
-            new_line = Segment.line()
-            for line in self.lines:
-                yield from line
-                yield new_line
-        else:
-            for line in self.lines:
-                yield from line
-
+SegmentLines = type(
+    "SegmentLines",
+    (),
+    {
+        "__doc__": "A simple renderable containing a number of lines of segments.",
+        "__init__": _segment_lines_init,
+        "__rich_console__": _segment_lines_rich_console,
+    },
+)
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
-    from rich.syntax import Syntax
-    from rich.text import Text
+    import importlib
 
-    code = """from rich.console import Console
-console = Console()
-text = Text.from_markup("Hello, [bold magenta]World[/]!")
-console.print(text)"""
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Console = importlib.import_module(_pkg + ".console").Console
+    Syntax = importlib.import_module(_pkg + ".syntax").Syntax
+    Text = importlib.import_module(_pkg + ".text").Text
+
+    code = (
+        "from "
+        + _pkg
+        + ".console import Console\nconsole = Console()\ntext = "
+        + _pkg
+        + '.text.Text.from_markup("Hello, [bold magenta]World[/]!")\nconsole.print(text)'
+    )
 
     text = Text.from_markup("Hello, [bold magenta]World[/]!")
 

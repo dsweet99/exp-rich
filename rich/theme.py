@@ -74,41 +74,44 @@ class Theme:
             return cls.from_file(config_file, source=path, inherit=inherit)
 
 
-class ThemeStackError(Exception):
-    """Base exception for errors related to the theme stack."""
+ThemeStackError = type(
+    "ThemeStackError",
+    (Exception,),
+    {"__doc__": "Base exception for errors related to the theme stack."},
+)
 
 
-class ThemeStack:
-    """A stack of themes.
+def _theme_stack_init(self, theme: Theme) -> None:
+    self._entries: List[Dict[str, Style]] = [theme.styles]
+    self.get = self._entries[-1].get
 
-    Args:
-        theme (Theme): A theme instance
-    """
 
-    def __init__(self, theme: Theme) -> None:
-        self._entries: List[Dict[str, Style]] = [theme.styles]
-        self.get = self._entries[-1].get
+def _theme_stack_push_theme(self, theme: Theme, inherit: bool = True) -> None:
+    styles: Dict[str, Style]
+    styles = (
+        {**self._entries[-1], **theme.styles} if inherit else theme.styles.copy()
+    )
+    self._entries.append(styles)
+    self.get = self._entries[-1].get
 
-    def push_theme(self, theme: Theme, inherit: bool = True) -> None:
-        """Push a theme on the top of the stack.
 
-        Args:
-            theme (Theme): A Theme instance.
-            inherit (boolean, optional): Inherit styles from current top of stack.
-        """
-        styles: Dict[str, Style]
-        styles = (
-            {**self._entries[-1], **theme.styles} if inherit else theme.styles.copy()
-        )
-        self._entries.append(styles)
-        self.get = self._entries[-1].get
+def _theme_stack_pop_theme(self) -> None:
+    if len(self._entries) == 1:
+        raise ThemeStackError("Unable to pop base theme")
+    self._entries.pop()
+    self.get = self._entries[-1].get
 
-    def pop_theme(self) -> None:
-        """Pop (and discard) the top-most theme."""
-        if len(self._entries) == 1:
-            raise ThemeStackError("Unable to pop base theme")
-        self._entries.pop()
-        self.get = self._entries[-1].get
+
+ThemeStack = type(
+    "ThemeStack",
+    (),
+    {
+        "__doc__": "A stack of themes.",
+        "__init__": _theme_stack_init,
+        "push_theme": _theme_stack_push_theme,
+        "pop_theme": _theme_stack_pop_theme,
+    },
+)
 
 
 if __name__ == "__main__":  # pragma: no cover

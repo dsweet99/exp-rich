@@ -69,42 +69,24 @@ foobar
        Code block
 """
 
-import io
-import re
-
-from rich.console import Console, RenderableType
-from rich.markdown import Markdown
-
-re_link_ids = re.compile(r"id=[\d\.\-]*?;.*?\x1b")
+from .render import render
 
 
-def replace_link_ids(render: str) -> str:
-    """Link IDs have a random ID and system path which is a problem for
-    reproducible tests.
+def _markdown(*args, **kwargs):
+    from rich.markdown import Markdown
 
-    """
-    return re_link_ids.sub("id=0;foo\x1b", render)
-
-
-def render(renderable: RenderableType) -> str:
-    console = Console(
-        width=100, file=io.StringIO(), color_system="truecolor", legacy_windows=False
-    )
-    console.print(renderable)
-    output = replace_link_ids(console.file.getvalue())
-    print(repr(output))
-    return output
+    return Markdown(*args, **kwargs)
 
 
 def test_markdown_render():
-    markdown = Markdown(MARKDOWN)
+    markdown = _markdown(MARKDOWN)
     rendered_markdown = render(markdown)
     expected = "                                              \x1b[1;4mHeading\x1b[0m                                               \n\n\x1b[4;35mSub-heading\x1b[0m                                                                                         \n\n\x1b[1;35mHeading\x1b[0m                                                                                             \n\n\x1b[3;35mH4 Heading\x1b[0m                                                                                          \n\n\x1b[3mH5 Heading\x1b[0m                                                                                          \n\n\x1b[2mH6 Heading\x1b[0m                                                                                          \n\nParagraphs are separated by a blank line.                                                           \n\nTwo spaces at the end of a line produces a line break.                                              \n\nText attributes \x1b[3mitalic\x1b[0m, \x1b[1mbold\x1b[0m, \x1b[1;36;40mmonospace\x1b[0m.                                                            \n\nHorizontal rule:                                                                                    \n\n\x1b[2m----------------------------------------------------------------------------------------------------\x1b[0m\n\nBullet list:                                                                                        \n\n\x1b[1m • \x1b[0mapples                                                                                           \n\x1b[1m • \x1b[0moranges                                                                                          \n\x1b[1m • \x1b[0mpears                                                                                            \n\nNumbered list:                                                                                      \n\n\x1b[36m 1 \x1b[0mlather                                                                                           \n\x1b[36m 2 \x1b[0mrinse                                                                                            \n\x1b[36m 3 \x1b[0mrepeat                                                                                           \n\nAn \x1b]8;id=0;foo\x1b\\\x1b[4;34mexample\x1b[0m\x1b]8;;\x1b\\.                                                                                         \n\n\x1b[35m▌ \x1b[0m\x1b[35mMarkdown uses email-style > characters for blockquoting.\x1b[0m\x1b[35m                                        \x1b[0m\n\x1b[35m▌ \x1b[0m\x1b[35mLorem ipsum\x1b[0m\x1b[35m                                                                                     \x1b[0m\n\n🌆 \x1b]8;id=0;foo\x1b\\progress\x1b]8;;\x1b\\                                                                                         \n\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\x1b[48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34ma=1\x1b[0m\x1b[48;2;39;40;34m                                                                                               \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\x1b[48;2;39;40;34m \x1b[0m\x1b[38;2;255;70;137;48;2;39;40;34mimport\x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mthis\x1b[0m\x1b[48;2;39;40;34m                                                                                       \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\x1b[48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mfoobar\x1b[0m\x1b[48;2;39;40;34m                                                                                            \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\x1b[48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mimport this\x1b[0m\x1b[48;2;39;40;34m                                                                                       \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\n\x1b[48;2;39;40;34m                                                                                                    \x1b[0m\n\n\x1b[36m 1 \x1b[0mList item                                                                                        \n\x1b[36m   \x1b[0m\x1b[48;2;39;40;34m                                                                                                 \x1b[0m\n\x1b[36m   \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\x1b[38;2;248;248;242;48;2;39;40;34mCode block\x1b[0m\x1b[48;2;39;40;34m                                                                                     \x1b[0m\x1b[48;2;39;40;34m \x1b[0m\n\x1b[36m   \x1b[0m\x1b[48;2;39;40;34m                                                                                                 \x1b[0m\n"
     assert rendered_markdown == expected
 
 
 def test_inline_code():
-    markdown = Markdown(
+    markdown = _markdown(
         "inline `import this` code",
         inline_code_lexer="python",
         inline_code_theme="emacs",
@@ -117,7 +99,7 @@ def test_inline_code():
 
 
 def test_markdown_table():
-    markdown = Markdown(
+    markdown = _markdown(
         """\
 | Year |                      Title                       | Director          |  Box Office (USD) |
 |------|:------------------------------------------------:|:------------------|------------------:|
@@ -135,7 +117,7 @@ def test_markdown_table():
 
 def test_inline_styles_in_table():
     """Regression test for https://github.com/Textualize/rich/issues/3115"""
-    markdown = Markdown(
+    markdown = _markdown(
         """\
 | Year | This **column** displays _the_ movie _title_ ~~description~~ | Director          |  Box Office (USD) |
 |------|:----------------------------------------------------------:|:------------------|------------------:|
@@ -154,7 +136,7 @@ def test_inline_styles_with_justification():
     In particular, this tests the interaction between the change that was made to fix
     #3115 and column text justification.
     """
-    markdown = Markdown(
+    markdown = _markdown(
         """\
 | left | center | right |
 | :- | :-: | -: |
@@ -167,7 +149,7 @@ def test_inline_styles_with_justification():
 
 
 def test_partial_table():
-    markdown = Markdown("| Simple | Table |\n| ------ | ----- ")
+    markdown = _markdown("| Simple | Table |\n| ------ | ----- ")
     result = render(markdown)
     print(repr(result))
     expected = "\n\x1b[36m               \x1b[0m\n\x1b[36m \x1b[0m\x1b[36mSimple\x1b[0m\x1b[1m \x1b[0m\x1b[36m \x1b[0m\x1b[36mTable\x1b[0m\x1b[36m \x1b[0m\n\x1b[36m ───────────── \x1b[0m\n\x1b[36m               \x1b[0m\n"
@@ -178,7 +160,7 @@ def test_table_with_empty_cells() -> None:
     """Test a table with empty cells is rendered without extra newlines above.
     Regression test for #3027 https://github.com/Textualize/rich/issues/3027
     """
-    complete_table = Markdown(
+    complete_table = _markdown(
         """\
 | First Header  | Second Header |
 | ------------- | ------------- |
@@ -186,7 +168,7 @@ def test_table_with_empty_cells() -> None:
 | Content Cell  | Content Cell  |
 """
     )
-    table_with_empty_cells = Markdown(
+    table_with_empty_cells = _markdown(
         """\
 | First Header  |               |
 | ------------- | ------------- |
@@ -205,7 +187,7 @@ def test_inline_code_in_table_cells() -> None:
     Regression test for https://github.com/Textualize/rich/issues/4038
 
     """
-    markdown = Markdown(
+    markdown = _markdown(
         "| Col |\n|---|\n| `print('hello');` |\n",
         inline_code_theme="monokai",
         inline_code_lexer="python",
@@ -216,7 +198,7 @@ def test_inline_code_in_table_cells() -> None:
 
 
 if __name__ == "__main__":
-    markdown = Markdown(MARKDOWN)
+    markdown = _markdown(MARKDOWN)
     rendered = render(markdown)
     print(rendered)
     print(repr(rendered))

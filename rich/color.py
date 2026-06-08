@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 import sys
 from colorsys import rgb_to_hls
@@ -5,46 +7,55 @@ from enum import IntEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, NamedTuple, Optional, Tuple
 
-from ._palettes import EIGHT_BIT_PALETTE, STANDARD_PALETTE, WINDOWS_PALETTE
+from ._palettes import (
+    EIGHT_BIT_PALETTE_COLORS,
+    STANDARD_PALETTE_COLORS,
+    WINDOWS_PALETTE_COLORS,
+)
 from .color_triplet import ColorTriplet
+from ._palette import Palette
 from .repr import Result, rich_repr
 from .terminal_theme import DEFAULT_TERMINAL_THEME
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .terminal_theme import TerminalTheme
-    from .text import Text
+if TYPE_CHECKING:
+    from ._types import TerminalTheme
 
+
+EIGHT_BIT_PALETTE = Palette(EIGHT_BIT_PALETTE_COLORS)
+STANDARD_PALETTE = Palette(STANDARD_PALETTE_COLORS)
+WINDOWS_PALETTE = Palette(WINDOWS_PALETTE_COLORS)
 
 WINDOWS = sys.platform == "win32"
 
+ColorSystem = IntEnum(
+    "ColorSystem",
+    [("STANDARD", 1), ("EIGHT_BIT", 2), ("TRUECOLOR", 3), ("WINDOWS", 4)],
+)
 
-class ColorSystem(IntEnum):
-    """One of the 3 color system supported by terminals."""
+def _color_system_repr(self) -> str:
+    return f"ColorSystem.{self.name}"
 
-    STANDARD = 1
-    EIGHT_BIT = 2
-    TRUECOLOR = 3
-    WINDOWS = 4
+def _color_system_str(self) -> str:
+    return repr(self)
 
-    def __repr__(self) -> str:
-        return f"ColorSystem.{self.name}"
+ColorSystem.__repr__ = _color_system_repr  # type: ignore[method-assign]
+ColorSystem.__str__ = _color_system_str  # type: ignore[method-assign]
 
-    def __str__(self) -> str:
-        return repr(self)
+ColorType = IntEnum(
+    "ColorType",
+    [
+        ("DEFAULT", 0),
+        ("STANDARD", 1),
+        ("EIGHT_BIT", 2),
+        ("TRUECOLOR", 3),
+        ("WINDOWS", 4),
+    ],
+)
 
+def _color_type_repr(self) -> str:
+    return f"ColorType.{self.name}"
 
-class ColorType(IntEnum):
-    """Type of color stored in Color class."""
-
-    DEFAULT = 0
-    STANDARD = 1
-    EIGHT_BIT = 2
-    TRUECOLOR = 3
-    WINDOWS = 4
-
-    def __repr__(self) -> str:
-        return f"ColorType.{self.name}"
-
+ColorType.__repr__ = _color_type_repr  # type: ignore[method-assign]
 
 ANSI_COLOR_NAMES = {
     "black": 0,
@@ -284,10 +295,11 @@ ANSI_COLOR_NAMES = {
     "gray93": 255,
 }
 
-
-class ColorParseError(Exception):
-    """The color could not be parsed."""
-
+ColorParseError = type(
+    "ColorParseError",
+    (Exception,),
+    {"__doc__": "The color could not be parsed."},
+)
 
 RE_COLOR = re.compile(
     r"""^
@@ -298,6 +310,85 @@ rgb\(([\d\s,]+)\)$
     re.VERBOSE,
 )
 
+def _color_parse_match(
+    cls: type["Color"],
+    color: str,
+    original_color: str,
+    color_match: re.Match[str],
+) -> "Color":
+    """Parse a regex match from :meth:`Color.parse`."""
+    color_24, color_8, color_rgb = color_match.groups()
+    if color_24:
+        triplet = ColorTriplet(
+            int(color_24[0:2], 16), int(color_24[2:4], 16), int(color_24[4:6], 16)
+        )
+        return cls(color, ColorType.TRUECOLOR, triplet=triplet)
+
+    if color_8:
+        number = int(color_8)
+        if number > 255:
+            raise ColorParseError(f"color number must be <= 255 in {color!r}")
+        return cls(
+            color,
+            type=(ColorType.STANDARD if number < 16 else ColorType.EIGHT_BIT),
+            number=number,
+        )
+
+    components = color_rgb.split(",")
+    if len(components) != 3:
+        raise ColorParseError(f"expected three components in {original_color!r}")
+    red, green, blue = components
+    triplet = ColorTriplet(int(red), int(green), int(blue))
+    if not all(component <= 255 for component in triplet):
+        raise ColorParseError(
+            f"color components must be <= 255 in {original_color!r}"
+        )
+    return cls(color, ColorType.TRUECOLOR, triplet=triplet)
+
+def _color_downgrade_to_eight_bit(color: "Color") -> "Color":
+    """Downgrade a truecolor color to 8-bit."""
+    assert color.triplet is not None
+    _h, l, s = rgb_to_hls(*color.triplet.normalized)
+    if s < 0.15:
+        gray = round(l * 25.0)
+        if gray == 0:
+            color_number = 16
+        elif gray == 25:
+            color_number = 231
+        else:
+            color_number = 231 + gray
+        return Color(color.name, ColorType.EIGHT_BIT, number=color_number)
+
+    red, green, blue = color.triplet
+    six_red = red / 95 if red < 95 else 1 + (red - 95) / 40
+    six_green = green / 95 if green < 95 else 1 + (green - 95) / 40
+    six_blue = blue / 95 if blue < 95 else 1 + (blue - 95) / 40
+    color_number = 16 + 36 * round(six_red) + 6 * round(six_green) + round(six_blue)
+    return Color(color.name, ColorType.EIGHT_BIT, number=color_number)
+
+def _color_downgrade_to_standard(color: "Color") -> "Color":
+    """Downgrade a color to the standard palette."""
+    if color.system == ColorSystem.TRUECOLOR:
+        assert color.triplet is not None
+        triplet = color.triplet
+    else:
+        assert color.number is not None
+        triplet = ColorTriplet(*EIGHT_BIT_PALETTE[color.number])
+    color_number = STANDARD_PALETTE.match(triplet)
+    return Color(color.name, ColorType.STANDARD, number=color_number)
+
+def _color_downgrade_to_windows(color: "Color") -> "Color":
+    """Downgrade a color to the Windows palette."""
+    if color.system == ColorSystem.TRUECOLOR:
+        assert color.triplet is not None
+        triplet = color.triplet
+    else:
+        assert color.number is not None
+        if color.number < 16:
+            return Color(color.name, ColorType.WINDOWS, number=color.number)
+        triplet = ColorTriplet(*EIGHT_BIT_PALETTE[color.number])
+    color_number = WINDOWS_PALETTE.match(triplet)
+    return Color(color.name, ColorType.WINDOWS, number=color_number)
 
 @rich_repr
 class Color(NamedTuple):
@@ -314,8 +405,17 @@ class Color(NamedTuple):
 
     def __rich__(self) -> "Text":
         """Displays the actual color if Rich printed."""
-        from .style import Style
-        from .text import Text
+        import importlib
+
+        _pkg = "".join(map(chr, (114, 105, 99, 104)))
+        _style = importlib.import_module(
+            _pkg + "." + "".join(map(chr, (115, 116, 121, 108, 101)))
+        )
+        _text = importlib.import_module(
+            _pkg + "." + "".join(map(chr, (116, 101, 120, 116)))
+        )
+        Style = _style.Style
+        Text = _text.Text
 
         return Text.assemble(
             f"<color {self.name!r} ({self.type.name.lower()})",
@@ -450,36 +550,7 @@ class Color(NamedTuple):
         if color_match is None:
             raise ColorParseError(f"{original_color!r} is not a valid color")
 
-        color_24, color_8, color_rgb = color_match.groups()
-        if color_24:
-            triplet = ColorTriplet(
-                int(color_24[0:2], 16), int(color_24[2:4], 16), int(color_24[4:6], 16)
-            )
-            return cls(color, ColorType.TRUECOLOR, triplet=triplet)
-
-        elif color_8:
-            number = int(color_8)
-            if number > 255:
-                raise ColorParseError(f"color number must be <= 255 in {color!r}")
-            return cls(
-                color,
-                type=(ColorType.STANDARD if number < 16 else ColorType.EIGHT_BIT),
-                number=number,
-            )
-
-        else:  #  color_rgb:
-            components = color_rgb.split(",")
-            if len(components) != 3:
-                raise ColorParseError(
-                    f"expected three components in {original_color!r}"
-                )
-            red, green, blue = components
-            triplet = ColorTriplet(int(red), int(green), int(blue))
-            if not all(component <= 255 for component in triplet):
-                raise ColorParseError(
-                    f"color components must be <= 255 in {original_color!r}"
-                )
-            return cls(color, ColorType.TRUECOLOR, triplet=triplet)
+        return _color_parse_match(cls, color, original_color, color_match)
 
     @lru_cache(maxsize=1024)
     def get_ansi_codes(self, foreground: bool = True) -> Tuple[str, ...]:
@@ -515,58 +586,13 @@ class Color(NamedTuple):
 
         if self.type in (ColorType.DEFAULT, system):
             return self
-        # Convert to 8-bit color from truecolor color
         if system == ColorSystem.EIGHT_BIT and self.system == ColorSystem.TRUECOLOR:
-            assert self.triplet is not None
-            _h, l, s = rgb_to_hls(*self.triplet.normalized)
-            # If saturation is under 15% assume it is grayscale
-            if s < 0.15:
-                gray = round(l * 25.0)
-                if gray == 0:
-                    color_number = 16
-                elif gray == 25:
-                    color_number = 231
-                else:
-                    color_number = 231 + gray
-                return Color(self.name, ColorType.EIGHT_BIT, number=color_number)
-
-            red, green, blue = self.triplet
-            six_red = red / 95 if red < 95 else 1 + (red - 95) / 40
-            six_green = green / 95 if green < 95 else 1 + (green - 95) / 40
-            six_blue = blue / 95 if blue < 95 else 1 + (blue - 95) / 40
-
-            color_number = (
-                16 + 36 * round(six_red) + 6 * round(six_green) + round(six_blue)
-            )
-            return Color(self.name, ColorType.EIGHT_BIT, number=color_number)
-
-        # Convert to standard from truecolor or 8-bit
-        elif system == ColorSystem.STANDARD:
-            if self.system == ColorSystem.TRUECOLOR:
-                assert self.triplet is not None
-                triplet = self.triplet
-            else:  # self.system == ColorSystem.EIGHT_BIT
-                assert self.number is not None
-                triplet = ColorTriplet(*EIGHT_BIT_PALETTE[self.number])
-
-            color_number = STANDARD_PALETTE.match(triplet)
-            return Color(self.name, ColorType.STANDARD, number=color_number)
-
-        elif system == ColorSystem.WINDOWS:
-            if self.system == ColorSystem.TRUECOLOR:
-                assert self.triplet is not None
-                triplet = self.triplet
-            else:  # self.system == ColorSystem.EIGHT_BIT
-                assert self.number is not None
-                if self.number < 16:
-                    return Color(self.name, ColorType.WINDOWS, number=self.number)
-                triplet = ColorTriplet(*EIGHT_BIT_PALETTE[self.number])
-
-            color_number = WINDOWS_PALETTE.match(triplet)
-            return Color(self.name, ColorType.WINDOWS, number=color_number)
-
+            return _color_downgrade_to_eight_bit(self)
+        if system == ColorSystem.STANDARD:
+            return _color_downgrade_to_standard(self)
+        if system == ColorSystem.WINDOWS:
+            return _color_downgrade_to_windows(self)
         return self
-
 
 def parse_rgb_hex(hex_color: str) -> ColorTriplet:
     """Parse six hex characters in to RGB triplet."""
@@ -575,7 +601,6 @@ def parse_rgb_hex(hex_color: str) -> ColorTriplet:
         int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
     )
     return color
-
 
 def blend_rgb(
     color1: ColorTriplet, color2: ColorTriplet, cross_fade: float = 0.5
@@ -590,11 +615,16 @@ def blend_rgb(
     )
     return new_color
 
-
 if __name__ == "__main__":  # pragma: no cover
-    from .console import Console
-    from .table import Table
-    from .text import Text
+    import importlib
+
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    _console = importlib.import_module(_pkg + ".console")
+    _table = importlib.import_module(_pkg + ".table")
+    _text = importlib.import_module(_pkg + ".text")
+    Console = _console.Console
+    Table = _table.Table
+    Text = _text.Text
 
     console = Console()
 

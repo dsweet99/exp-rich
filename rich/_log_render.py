@@ -1,15 +1,24 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Iterable, List, Optional, TYPE_CHECKING, Union, Callable
+from typing import Iterable, List, Optional, Union, Callable, TYPE_CHECKING
 
-
-from .text import Text, TextType
+from ._lazy import Lazy
+from ._pick import M_CONSOLE, M_TEXT, rich_module
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleRenderable, RenderableType
-    from .table import Table
+    from ._types import ConsoleRenderable, RenderableType, Table
+
+
+
+def _Text():
+    return rich_module(M_TEXT).Text
+
+
+Text = Lazy(_Text)
+TextType = Union[str, "Text"]
 
 FormatTimeCallable = Callable[[datetime], Text]
-
 
 class LogRender:
     def __init__(
@@ -29,6 +38,23 @@ class LogRender:
         self.level_width = level_width
         self._last_time: Optional[Text] = None
 
+    def _time_cell(
+        self,
+        console: "Console",
+        log_time: Optional[datetime],
+        time_format: Optional[Union[str, FormatTimeCallable]],
+    ) -> "RenderableType":
+        log_time = log_time or console.get_datetime()
+        time_format = time_format or self.time_format
+        if callable(time_format):
+            log_time_display = time_format(log_time)
+        else:
+            log_time_display = Text(log_time.strftime(time_format))
+        if log_time_display == self._last_time and self.omit_repeated_times:
+            return Text(" " * len(log_time_display))
+        self._last_time = log_time_display
+        return log_time_display
+
     def __call__(
         self,
         console: "Console",
@@ -40,8 +66,8 @@ class LogRender:
         line_no: Optional[int] = None,
         link_path: Optional[str] = None,
     ) -> "Table":
-        from .containers import Renderables
-        from .table import Table
+        Renderables = rich_module((99, 111, 110, 116, 97, 105, 110, 101, 114, 115)).Renderables
+        Table = rich_module((116, 97, 98, 108, 101)).Table
 
         output = Table.grid(padding=(0, 1))
         output.expand = True
@@ -54,40 +80,34 @@ class LogRender:
             output.add_column(style="log.path")
         row: List["RenderableType"] = []
         if self.show_time:
-            log_time = log_time or console.get_datetime()
-            time_format = time_format or self.time_format
-            if callable(time_format):
-                log_time_display = time_format(log_time)
-            else:
-                log_time_display = Text(log_time.strftime(time_format))
-            if log_time_display == self._last_time and self.omit_repeated_times:
-                row.append(Text(" " * len(log_time_display)))
-            else:
-                row.append(log_time_display)
-                self._last_time = log_time_display
+            row.append(self._time_cell(console, log_time, time_format))
         if self.show_level:
             row.append(level)
 
         row.append(Renderables(renderables))
         if self.show_path and path:
-            path_text = Text()
-            path_text.append(
-                path, style=f"link file://{link_path}" if link_path else ""
-            )
-            if line_no:
-                path_text.append(":")
-                path_text.append(
-                    f"{line_no}",
-                    style=f"link file://{link_path}#{line_no}" if link_path else "",
-                )
-            row.append(path_text)
+            row.append(_log_render_path_cell(path, line_no, link_path))
 
         output.add_row(*row)
         return output
 
 
+def _log_render_path_cell(
+    path: str, line_no: Optional[int], link_path: Optional[str]
+) -> Text:
+    path_text = Text()
+    path_text.append(path, style=f"link file://{link_path}" if link_path else "")
+    if line_no:
+        path_text.append(":")
+        path_text.append(
+            f"{line_no}",
+            style=f"link file://{link_path}#{line_no}" if link_path else "",
+        )
+    return path_text
+
+
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+    Console = rich_module(M_CONSOLE).Console
 
     c = Console()
     c.print("[on blue]Hello", justify="right")

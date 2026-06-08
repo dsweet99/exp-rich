@@ -1,8 +1,9 @@
-from .palette import Palette
+from typing import Sequence, Tuple
 
+RGBColors = Sequence[Tuple[int, int, int]]
 
 # Taken from https://en.wikipedia.org/wiki/ANSI_escape_code (Windows 10 column)
-WINDOWS_PALETTE = Palette(
+WINDOWS_PALETTE_COLORS: RGBColors = (
     [
         (12, 12, 12),
         (197, 15, 31),
@@ -23,8 +24,8 @@ WINDOWS_PALETTE = Palette(
     ]
 )
 
-# # The standard ansi colors (including bright variants)
-STANDARD_PALETTE = Palette(
+# The standard ansi colors (including bright variants)
+STANDARD_PALETTE_COLORS: RGBColors = (
     [
         (0, 0, 0),
         (170, 0, 0),
@@ -47,7 +48,7 @@ STANDARD_PALETTE = Palette(
 
 
 # The 256 color palette
-EIGHT_BIT_PALETTE = Palette(
+EIGHT_BIT_PALETTE_COLORS: RGBColors = (
     [
         (0, 0, 0),
         (128, 0, 0),

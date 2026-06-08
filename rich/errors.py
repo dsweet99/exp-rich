@@ -1,34 +1,27 @@
-class ConsoleError(Exception):
-    """An error in console operation."""
+ConsoleError = type("ConsoleError", (Exception,), {"__doc__": "An error in console operation."})
 
+StyleError = type("StyleError", (Exception,), {"__doc__": "An error in styles."})
 
-class StyleError(Exception):
-    """An error in styles."""
+StyleSyntaxError = type(
+    "StyleSyntaxError", (ConsoleError,), {"__doc__": "Style was badly formatted."}
+)
 
+MissingStyle = type("MissingStyle", (StyleError,), {"__doc__": "No such style."})
 
-class StyleSyntaxError(ConsoleError):
-    """Style was badly formatted."""
+StyleStackError = type(
+    "StyleStackError", (ConsoleError,), {"__doc__": "Style stack is invalid."}
+)
 
+NotRenderableError = type(
+    "NotRenderableError", (ConsoleError,), {"__doc__": "Object is not renderable."}
+)
 
-class MissingStyle(StyleError):
-    """No such style."""
+MarkupError = type(
+    "MarkupError", (ConsoleError,), {"__doc__": "Markup was badly formatted."}
+)
 
+LiveError = type("LiveError", (ConsoleError,), {"__doc__": "Error related to Live display."})
 
-class StyleStackError(ConsoleError):
-    """Style stack is invalid."""
-
-
-class NotRenderableError(ConsoleError):
-    """Object is not renderable."""
-
-
-class MarkupError(ConsoleError):
-    """Markup was badly formatted."""
-
-
-class LiveError(ConsoleError):
-    """Error related to Live display."""
-
-
-class NoAltScreen(ConsoleError):
-    """Alt screen mode was required."""
+NoAltScreen = type(
+    "NoAltScreen", (ConsoleError,), {"__doc__": "Alt screen mode was required."}
+)

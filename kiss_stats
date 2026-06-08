@@ -1,0 +1,39 @@
+kiss stats - Summary Statistics
+Analyzed from: .
+Config: defaults + ~/.kissconfig (found: /home/dsweet/.kissconfig) + ./.kissconfig (found)
+
+Analyzed: 238 files, 2421 code_units, 11273 statements, 238 graph_nodes, 705 graph_edges
+Violations: 0 duplicate, 0 orphan
+
+=== Python (238 files) ===
+metric_id                        N   p50   p90   p95   p99   max
+----------------------------------------------------------------
+statements_per_function       2102     4    13    16    22    25
+arguments_per_function        2102     0     4     6    13    28
+positional_args               2102     0     3     4     8    16
+keyword_only_args             2102     0     0     2    10    28
+max_indentation_depth         2102     1     3     4     4     4
+nested_function_depth         2102     0     0     0     1     2
+returns_per_function          2102     0     1     2     4     8
+return_values_per_function    2102     0     1     1     2     5
+branches_per_function         2102     0     2     4     6    10
+local_variables_per_function  2102     1     4     6    10    20
+statements_per_try_block      2102     0     0     0     2    10
+boolean_parameters            2102     0     0     1     4    10
+annotations_per_function      2102     0     1     1     1     6
+calls_per_function            2102     3     9    12    20    46
+methods_per_class               81     3    18    24    58    73
+statements_per_file            238    13   122   218   508   545
+lines_per_file                 238    80   625   704  1883  3610
+functions_per_file             238     3    22    45    94   110
+interface_types_per_file       238     0     0     0     1     2
+concrete_types_per_file        238     0     1     1     1     1
+imported_names_per_file        232     5    19    25    50    77
+inv_test_coverage              238     0   100   100   100   100
+fan_in                         238     0     7    13    37    81
+fan_out                        238     2     7     9    14    23
+cycle_size                     238     0     0     0     0     0
+indirect_dependencies          238     6    50    58    64    64
+dependency_depth               238     3     5     5     6     6
+
+

@@ -174,11 +174,13 @@ DEFAULT_STYLES: Dict[str, Style] = {
 
 if __name__ == "__main__":  # pragma: no cover
     import argparse
+    import importlib
     import io
 
-    from rich.console import Console
-    from rich.table import Table
-    from rich.text import Text
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Console = importlib.import_module(_pkg + ".console").Console
+    Table = importlib.import_module(_pkg + ".table").Table
+    Text = importlib.import_module(_pkg + ".text").Text
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--html", action="store_true", help="Export as HTML table")

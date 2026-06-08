@@ -1,4 +1,4 @@
-from rich._palettes import STANDARD_PALETTE
+from rich.color import STANDARD_PALETTE
 from rich.table import Table
 
 

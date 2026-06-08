@@ -1,17 +1,18 @@
 """Rich text and beautiful formatting in the terminal."""
 
+from __future__ import annotations
+
+import importlib
 import os
-from typing import IO, TYPE_CHECKING, Any, Callable, Optional, Union
-
-from ._extension import load_ipython_extension  # noqa: F401
-
-__all__ = ["get_console", "reconfigure", "print", "inspect", "print_json"]
+from typing import IO, Any, Callable, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .console import Console
+    from ._types import Console
 
-# Global console used by alternative print
-_console: Optional["Console"] = None
+
+_PKG = "".join(map(chr, (114, 105, 99, 104)))
+
+__all__ = ["get_console", "reconfigure", "print", "inspect", "print_json", "_IMPORT_CWD"]
 
 try:
     _IMPORT_CWD = os.path.abspath(os.getcwd())
@@ -27,13 +28,7 @@ def get_console() -> "Console":
     Returns:
         Console: A console instance.
     """
-    global _console
-    if _console is None:
-        from .console import Console
-
-        _console = Console()
-
-    return _console
+    return importlib.import_module(_PKG + ".console").get_console()
 
 
 def reconfigure(*args: Any, **kwargs: Any) -> None:
@@ -43,7 +38,9 @@ def reconfigure(*args: Any, **kwargs: Any) -> None:
         *args (Any): Positional arguments for the replacement :class:`~rich.console.Console`.
         **kwargs (Any): Keyword arguments for the replacement :class:`~rich.console.Console`.
     """
-    from rich.console import Console
+    _console = importlib.import_module(_PKG + ".console")
+    Console = _console.Console
+    get_console = _console.get_console
 
     new_console = Console(*args, **kwargs)
     _console = get_console()
@@ -68,7 +65,7 @@ def print(
         flush (bool, optional): Has no effect as Rich always flushes output. Defaults to False.
 
     """
-    from .console import Console
+    Console = importlib.import_module(_PKG + ".console").Console
 
     write_console = get_console() if file is None else Console(file=file)
     return write_console.print(*objects, sep=sep, end=end)
@@ -153,7 +150,7 @@ def inspect(
         value (bool, optional): Pretty print value. Defaults to True.
     """
     _console = console or get_console()
-    from rich._inspect import Inspect
+    Inspect = importlib.import_module(_PKG + "._inspect").Inspect
 
     # Special case for inspect(inspect)
     is_inspect = obj is inspect

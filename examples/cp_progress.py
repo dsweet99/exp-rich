@@ -5,9 +5,9 @@ import os
 import shutil
 import sys
 
-from rich.progress import Progress
-
 if __name__ == "__main__":
+    from rich.progress import Progress
+
     if len(sys.argv) == 3:
         with Progress() as progress:
             desc = os.path.basename(sys.argv[1])

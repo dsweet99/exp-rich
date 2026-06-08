@@ -1,5 +1,6 @@
 from rich.console import Console
-from rich.containers import Lines, Renderables
+from rich._lines import Lines
+from rich.containers import Renderables
 from rich.text import Span, Text
 from rich.style import Style
 

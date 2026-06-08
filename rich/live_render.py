@@ -1,11 +1,20 @@
-from typing import Literal, Optional, Tuple
+from __future__ import annotations
 
+from typing import Literal, Optional, Tuple, TYPE_CHECKING
+
+from ._lazy import Lazy
 from ._loop import loop_last
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .control import Control
-from .segment import ControlType, Segment
-from .style import StyleType
-from .text import Text
+from ._pick import M_CONTROL, M_SEGMENT, M_TEXT, rich_module
+
+if TYPE_CHECKING:
+    from ._types import Console, ConsoleOptions, RenderResult, RenderableType
+
+
+Control = Lazy(lambda: rich_module(M_CONTROL).Control)
+Segment = Lazy(lambda: rich_module(M_SEGMENT).Segment)
+ControlType = Lazy(lambda: rich_module(M_SEGMENT).ControlType)
+Text = Lazy(lambda: rich_module(M_TEXT).Text)
+StyleType = str
 
 VerticalOverflowMethod = Literal["crop", "ellipsis", "visible"]
 

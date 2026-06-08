@@ -9,29 +9,6 @@ import signal
 from functools import partial
 from threading import Event
 from typing import Iterable
-from urllib.request import urlopen
-
-from rich.progress import (
-    BarColumn,
-    DownloadColumn,
-    Progress,
-    TaskID,
-    TextColumn,
-    TimeRemainingColumn,
-    TransferSpeedColumn,
-)
-
-progress = Progress(
-    TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
-    BarColumn(bar_width=None),
-    "[progress.percentage]{task.percentage:>3.1f}%",
-    "•",
-    DownloadColumn(),
-    "•",
-    TransferSpeedColumn(),
-    "•",
-    TimeRemainingColumn(),
-)
 
 
 done_event = Event()
@@ -41,11 +18,10 @@ def handle_sigint(signum, frame):
     done_event.set()
 
 
-signal.signal(signal.SIGINT, handle_sigint)
-
-
-def copy_url(task_id: TaskID, url: str, path: str) -> None:
+def copy_url(progress, task_id, url: str, path: str) -> None:
     """Copy data from a url to a local file."""
+    from urllib.request import urlopen
+
     progress.console.log(f"Requesting {url}")
     response = urlopen(url)
     # This will break if the response doesn't contain content length
@@ -62,6 +38,26 @@ def copy_url(task_id: TaskID, url: str, path: str) -> None:
 
 def download(urls: Iterable[str], dest_dir: str):
     """Download multiple files to the given directory."""
+    from rich.progress import (
+        BarColumn,
+        DownloadColumn,
+        Progress,
+        TextColumn,
+        TimeRemainingColumn,
+        TransferSpeedColumn,
+    )
+
+    progress = Progress(
+        TextColumn("[bold blue]{task.fields[filename]}", justify="right"),
+        BarColumn(bar_width=None),
+        "[progress.percentage]{task.percentage:>3.1f}%",
+        "•",
+        DownloadColumn(),
+        "•",
+        TransferSpeedColumn(),
+        "•",
+        TimeRemainingColumn(),
+    )
 
     with progress:
         with ThreadPoolExecutor(max_workers=4) as pool:
@@ -69,10 +65,11 @@ def download(urls: Iterable[str], dest_dir: str):
                 filename = url.split("/")[-1]
                 dest_path = os.path.join(dest_dir, filename)
                 task_id = progress.add_task("download", filename=filename, start=False)
-                pool.submit(copy_url, task_id, url, dest_path)
+                pool.submit(copy_url, progress, task_id, url, dest_path)
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, handle_sigint)
     # Try with https://releases.ubuntu.com/noble/ubuntu-24.04-desktop-amd64.iso
     # and https://releases.ubuntu.com/noble/ubuntu-24.04-live-server-amd64.iso
     if sys.argv[1:]:

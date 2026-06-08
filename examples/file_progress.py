@@ -1,16 +1,18 @@
 from time import sleep
 from urllib.request import urlopen
 
-from rich.progress import wrap_file
 
-# Read a URL with urlopen
-response = urlopen("https://www.textualize.io")
-# Get the size from the headers
-size = int(response.headers["Content-Length"])
+def main() -> None:
+    from rich.progress import wrap_file
 
-# Wrap the response so that it update progress
+    response = urlopen("https://www.textualize.io")
+    size = int(response.headers["Content-Length"])
 
-with wrap_file(response, size) as file:
-    for line in file:
-        print(line.decode("utf-8"), end="")
-        sleep(0.1)
+    with wrap_file(response, size) as file:
+        for line in file:
+            print(line.decode("utf-8"), end="")
+            sleep(0.1)
+
+
+if __name__ == "__main__":
+    main()

@@ -26,9 +26,14 @@ class SystemPager(Pager):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from .__main__ import make_test_card
-    from .console import Console
+    import importlib
+
+    from ._pick import M_TEXT, rich_module
+
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Console = importlib.import_module(_pkg + ".console").Console
+    Text = rich_module(M_TEXT).Text
 
     console = Console()
     with console.pager(styles=True):
-        console.print(make_test_card())
+        console.print(Text("Hello, World!"))

@@ -1,11 +1,15 @@
-from types import TracebackType
-from typing import Optional, Type
+from __future__ import annotations
 
-from .console import Console, RenderableType
-from .jupyter import JupyterMixin
-from .live import Live
-from .spinner import Spinner
+from types import TracebackType
+from typing import Optional, Type, TYPE_CHECKING
+
+from ._jupyter_mixin import JupyterMixin
+from ._pick import M_CONSOLE, M_LIVE, M_SPINNER, rich_module
 from .style import StyleType
+
+if TYPE_CHECKING:
+    from ._types import Console, RenderableType
+
 
 
 class Status(JupyterMixin):
@@ -22,14 +26,16 @@ class Status(JupyterMixin):
 
     def __init__(
         self,
-        status: RenderableType,
+        status: "RenderableType",
         *,
-        console: Optional[Console] = None,
+        console: Optional["Console"] = None,
         spinner: str = "dots",
         spinner_style: StyleType = "status.spinner",
         speed: float = 1.0,
         refresh_per_second: float = 12.5,
     ):
+        Spinner = rich_module(M_SPINNER).Spinner
+        Live = rich_module(M_LIVE).Live
         self.status = status
         self.spinner_style = spinner_style
         self.speed = speed
@@ -42,17 +48,16 @@ class Status(JupyterMixin):
         )
 
     @property
-    def renderable(self) -> Spinner:
+    def renderable(self):
         return self._spinner
 
     @property
     def console(self) -> "Console":
-        """Get the Console used by the Status objects."""
         return self._live.console
 
     def update(
         self,
-        status: Optional[RenderableType] = None,
+        status: Optional["RenderableType"] = None,
         *,
         spinner: Optional[str] = None,
         spinner_style: Optional[StyleType] = None,
@@ -70,17 +75,17 @@ class Status(JupyterMixin):
             self.status = status
         if spinner_style is not None:
             self.spinner_style = spinner_style
-        if speed is not None:
-            self.speed = speed
         if spinner is not None:
-            self._spinner = Spinner(
-                spinner, text=self.status, style=self.spinner_style, speed=self.speed
+            self._spinner = rich_module(M_SPINNER).Spinner(
+                spinner,
+                text=self.status,
+                style=self.spinner_style,
+                speed=speed or self.speed,
             )
+        elif speed is not None:
+            self._spinner.update(speed=speed)
+        if any(arg is not None for arg in (status, spinner, spinner_style, speed)):
             self._live.update(self.renderable, refresh=True)
-        else:
-            self._spinner.update(
-                text=self.status, style=self.spinner_style, speed=self.speed
-            )
 
     def start(self) -> None:
         """Start the status animation."""
@@ -90,7 +95,7 @@ class Status(JupyterMixin):
         """Stop the spinner animation."""
         self._live.stop()
 
-    def __rich__(self) -> RenderableType:
+    def __rich__(self) -> "RenderableType":
         return self.renderable
 
     def __enter__(self) -> "Status":
@@ -109,23 +114,9 @@ class Status(JupyterMixin):
 if __name__ == "__main__":  # pragma: no cover
     from time import sleep
 
-    from .console import Console
-
-    console = Console()
+    console = rich_module(M_CONSOLE).Console()
     with console.status("[magenta]Covid detector booting up") as status:
         sleep(3)
-        console.log("Importing advanced AI")
+        status.update("[bold yellow]Detecting Covid")
         sleep(3)
-        console.log("Advanced Covid AI Ready")
-        sleep(3)
-        status.update(status="[bold blue] Scanning for Covid", spinner="earth")
-        sleep(3)
-        console.log("Found 10,000,000,000 copies of Covid32.exe")
-        sleep(3)
-        status.update(
-            status="[bold red]Moving Covid32.exe to Trash",
-            spinner="bouncingBall",
-            spinner_style="yellow",
-        )
-        sleep(5)
-    console.print("[bold green]Covid deleted successfully")
+    console.print("[bold green]Covid not detected")

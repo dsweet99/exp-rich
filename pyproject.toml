@@ -66,3 +66,23 @@ testpaths = ["tests"]
 
 [tool.isort]
 profile = "black"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E402", "F841", "F821"]
+"tests/*" = ["E712", "E711", "E402", "F811", "F841", "E722", "F821"]
+"tools/*" = ["E402"]
+"rich/console.py" = ["F821"]
+"rich/traceback.py" = ["F821"]
+"rich/_win32_console.py" = ["E402"]
+"rich/__main__.py" = ["E741"]
+"rich/color.py" = ["E741"]
+"rich/palette.py" = ["E741"]
+"rich/pretty.py" = ["E721"]
+"rich/logging.py" = ["F841", "E722"]

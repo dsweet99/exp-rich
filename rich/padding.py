@@ -1,19 +1,49 @@
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
+from __future__ import annotations
 
-if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        RenderableType,
-        RenderResult,
-    )
+from typing import List, Optional, Tuple, Union, TYPE_CHECKING
 
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
+from ._jupyter_mixin import JupyterMixin
+from ._padding_dims import PaddingDimensions, unpack_padding
+from ._pick import M_SEGMENT, rich_module
 from .style import Style
 
-PaddingDimensions = Union[int, Tuple[int], Tuple[int, int], Tuple[int, int, int, int]]
+if TYPE_CHECKING:
+    from ._types import Console, ConsoleOptions, Measurement, RenderResult, RenderableType, Segment
+
+
+
+def _Segment():
+    return rich_module(M_SEGMENT).Segment
+
+
+def _yield_padded_lines(
+    lines: List[List["Segment"]],
+    *,
+    left: Optional["Segment"],
+    right: List["Segment"],
+    top: int,
+    bottom: int,
+    width: int,
+    style: Style,
+    blank_line: Optional[List["Segment"]],
+) -> "RenderResult":
+    """Yield padded render output."""
+    Segment = _Segment()
+    if top:
+        blank_line = blank_line or [Segment(f'{" " * width}\n', style)]
+        yield from blank_line * top
+    if left:
+        for line in lines:
+            yield left
+            yield from line
+            yield from right
+    else:
+        for line in lines:
+            yield from line
+            yield from right
+    if bottom:
+        blank_line = blank_line or [Segment(f'{" " * width}\n', style)]
+        yield from blank_line * bottom
 
 
 class Padding(JupyterMixin):
@@ -60,18 +90,7 @@ class Padding(JupyterMixin):
     @staticmethod
     def unpack(pad: "PaddingDimensions") -> Tuple[int, int, int, int]:
         """Unpack padding specified in CSS style."""
-        if isinstance(pad, int):
-            return (pad, pad, pad, pad)
-        if len(pad) == 1:
-            _pad = pad[0]
-            return (_pad, _pad, _pad, _pad)
-        if len(pad) == 2:
-            pad_top, pad_right = pad
-            return (pad_top, pad_right, pad_top, pad_right)
-        if len(pad) == 4:
-            top, right, bottom, left = pad
-            return (top, right, bottom, left)
-        raise ValueError(f"1, 2 or 4 integers required for padding; {len(pad)} given")
+        return unpack_padding(pad)
 
     def __repr__(self) -> str:
         return f"Padding({self.renderable!r}, ({self.top},{self.right},{self.bottom},{self.left}))"
@@ -79,6 +98,8 @@ class Padding(JupyterMixin):
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
+        from .measure import Measurement
+
         style = console.get_style(self.style)
         if self.expand:
             width = options.max_width
@@ -97,34 +118,29 @@ class Padding(JupyterMixin):
         lines = console.render_lines(
             self.renderable, render_options, style=style, pad=True
         )
-        _Segment = Segment
-
-        left = _Segment(" " * self.left, style) if self.left else None
+        Segment = _Segment()
+        left = Segment(" " * self.left, style) if self.left else None
         right = (
-            [_Segment(f'{" " * self.right}', style), _Segment.line()]
+            [Segment(f'{" " * self.right}', style), Segment.line()]
             if self.right
-            else [_Segment.line()]
+            else [Segment.line()]
         )
-        blank_line: Optional[List[Segment]] = None
-        if self.top:
-            blank_line = [_Segment(f'{" " * width}\n', style)]
-            yield from blank_line * self.top
-        if left:
-            for line in lines:
-                yield left
-                yield from line
-                yield from right
-        else:
-            for line in lines:
-                yield from line
-                yield from right
-        if self.bottom:
-            blank_line = blank_line or [_Segment(f'{" " * width}\n', style)]
-            yield from blank_line * self.bottom
+        yield from _yield_padded_lines(
+            lines,
+            left=left,
+            right=right,
+            top=self.top,
+            bottom=self.bottom,
+            width=width,
+            style=style,
+            blank_line=None,
+        )
 
     def __rich_measure__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "Measurement":
+        from .measure import Measurement
+
         max_width = options.max_width
         extra_width = self.left + self.right
         if max_width - extra_width < 1:
@@ -136,6 +152,6 @@ class Padding(JupyterMixin):
 
 
 if __name__ == "__main__":  #  pragma: no cover
-    from rich import print
+    from . import print
 
     print(Padding("Hello, World", (2, 4), style="on blue"))

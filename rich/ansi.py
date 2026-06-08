@@ -1,11 +1,22 @@
-import re
-import sys
-from contextlib import suppress
-from typing import Iterable, NamedTuple, Optional
+from __future__ import annotations
 
-from .color import Color
-from .style import Style
-from .text import Text
+import re
+from contextlib import suppress
+from typing import Callable, Iterable, Iterator, Optional, Tuple
+
+from ._pick import M_COLOR, M_STYLE, M_TEXT, rich_module
+
+
+def _Color() -> type:
+    return rich_module(M_COLOR).Color
+
+
+def _Style() -> type:
+    return rich_module(M_STYLE).Style
+
+
+def _Text() -> type:
+    return rich_module(M_TEXT).Text
 
 re_ansi = re.compile(
     r"""
@@ -17,12 +28,7 @@ re_ansi = re.compile(
 )
 
 
-class _AnsiToken(NamedTuple):
-    """Result of ansi tokenized string."""
-
-    plain: str = ""
-    sgr: Optional[str] = ""
-    osc: Optional[str] = ""
+_AnsiToken = Tuple[str, Optional[str], Optional[str]]
 
 
 def _ansi_tokenize(ansi_text: str) -> Iterable[_AnsiToken]:
@@ -32,7 +38,7 @@ def _ansi_tokenize(ansi_text: str) -> Iterable[_AnsiToken]:
         ansi_text (str): A String containing ANSI codes.
 
     Yields:
-        AnsiToken: A named tuple of (plain, sgr, osc)
+        AnsiToken: A tuple of (plain, sgr, osc)
     """
 
     position = 0
@@ -42,18 +48,18 @@ def _ansi_tokenize(ansi_text: str) -> Iterable[_AnsiToken]:
         start, end = match.span(0)
         osc, sgr = match.groups()
         if start > position:
-            yield _AnsiToken(ansi_text[position:start])
+            yield (ansi_text[position:start], "", "")
         if sgr:
             if sgr == "(":
                 position = end + 1
                 continue
             if sgr.endswith("m"):
-                yield _AnsiToken("", sgr[1:-1], osc)
+                yield ("", sgr[1:-1], osc)
         else:
-            yield _AnsiToken("", sgr, osc)
+            yield ("", sgr, osc)
         position = end
     if position < len(ansi_text):
-        yield _AnsiToken(ansi_text[position:])
+        yield (ansi_text[position:], "", "")
 
 
 SGR_STYLE_MAP = {
@@ -117,13 +123,116 @@ SGR_STYLE_MAP = {
 }
 
 
+def _apply_osc_sequence(decoder: "AnsiDecoder", osc: str) -> None:
+    if osc.startswith("8;"):
+        _params, semicolon, link = osc[2:].partition(";")
+        if semicolon:
+            decoder.style = decoder.style.update_link(link or None)
+
+
+def _apply_foreground_color(
+    decoder: "AnsiDecoder",
+    iter_codes: Iterable[int],
+    *,
+    from_ansi: Callable[..., object],
+    from_rgb: Callable[..., object],
+) -> None:
+    Style = _Style()
+    with suppress(StopIteration):
+        color_type = next(iter_codes)
+        if color_type == 5:
+            decoder.style += Style.from_color(from_ansi(next(iter_codes)))
+        elif color_type == 2:
+            decoder.style += Style.from_color(
+                from_rgb(
+                    next(iter_codes),
+                    next(iter_codes),
+                    next(iter_codes),
+                )
+            )
+
+
+def _apply_background_color(
+    decoder: "AnsiDecoder",
+    iter_codes: Iterable[int],
+    *,
+    from_ansi: Callable[..., object],
+    from_rgb: Callable[..., object],
+) -> None:
+    Style = _Style()
+    with suppress(StopIteration):
+        color_type = next(iter_codes)
+        if color_type == 5:
+            decoder.style += Style.from_color(None, from_ansi(next(iter_codes)))
+        elif color_type == 2:
+            decoder.style += Style.from_color(
+                None,
+                from_rgb(
+                    next(iter_codes),
+                    next(iter_codes),
+                    next(iter_codes),
+                ),
+            )
+
+
+def _apply_sgr_code(
+    decoder: "AnsiDecoder",
+    code: int,
+    iter_codes: Iterable[int],
+    *,
+    from_ansi: Callable[..., object],
+    from_rgb: Callable[..., object],
+) -> None:
+    Style = _Style()
+    if code == 0:
+        decoder.style = Style.null()
+    elif code in SGR_STYLE_MAP:
+        decoder.style += Style.parse(SGR_STYLE_MAP[code])
+    elif code == 38:
+        _apply_foreground_color(
+            decoder, iter_codes, from_ansi=from_ansi, from_rgb=from_rgb
+        )
+    elif code == 48:
+        _apply_background_color(
+            decoder, iter_codes, from_ansi=from_ansi, from_rgb=from_rgb
+        )
+
+
+def _decode_ansi_token(
+    decoder: "AnsiDecoder",
+    text: object,
+    plain_text: str,
+    sgr: Optional[str],
+    osc: Optional[str],
+) -> None:
+    Color = _Color()
+    append = text.append
+    if plain_text:
+        append(plain_text, decoder.style or None)
+    elif osc is not None:
+        _apply_osc_sequence(decoder, osc)
+    elif sgr is not None:
+        from_ansi = Color.from_ansi
+        from_rgb = Color.from_rgb
+        codes = [
+            min(255, int(_code) if _code else 0)
+            for _code in sgr.split(";")
+            if _code.isdigit() or _code == ""
+        ]
+        iter_codes: Iterator[int] = iter(codes)
+        for code in iter_codes:
+            _apply_sgr_code(
+                decoder, code, iter_codes, from_ansi=from_ansi, from_rgb=from_rgb
+            )
+
+
 class AnsiDecoder:
     """Translate ANSI code in to styled Text."""
 
     def __init__(self) -> None:
-        self.style = Style.null()
+        self.style = _Style().null()
 
-    def decode(self, terminal_text: str) -> Iterable[Text]:
+    def decode(self, terminal_text: str) -> Iterable[object]:
         """Decode ANSI codes in an iterable of lines.
 
         Args:
@@ -135,7 +244,7 @@ class AnsiDecoder:
         for line in re.split(r"(?<=\n)", terminal_text):
             yield self.decode_line(line.rstrip("\n"))
 
-    def decode_line(self, line: str) -> Text:
+    def decode_line(self, line: str) -> object:
         """Decode a line containing ansi codes.
 
         Args:
@@ -144,78 +253,23 @@ class AnsiDecoder:
         Returns:
             Text: A Text instance marked up according to ansi codes.
         """
-        from_ansi = Color.from_ansi
-        from_rgb = Color.from_rgb
-        _Style = Style
+        Text = _Text()
         text = Text()
-        append = text.append
         line = line.rsplit("\r", 1)[-1]
         for plain_text, sgr, osc in _ansi_tokenize(line):
-            if plain_text:
-                append(plain_text, self.style or None)
-            elif osc is not None:
-                if osc.startswith("8;"):
-                    _params, semicolon, link = osc[2:].partition(";")
-                    if semicolon:
-                        self.style = self.style.update_link(link or None)
-            elif sgr is not None:
-                # Translate in to semi-colon separated codes
-                # Ignore invalid codes, because we want to be lenient
-                codes = [
-                    min(255, int(_code) if _code else 0)
-                    for _code in sgr.split(";")
-                    if _code.isdigit() or _code == ""
-                ]
-                iter_codes = iter(codes)
-                for code in iter_codes:
-                    if code == 0:
-                        # reset
-                        self.style = _Style.null()
-                    elif code in SGR_STYLE_MAP:
-                        # styles
-                        self.style += _Style.parse(SGR_STYLE_MAP[code])
-                    elif code == 38:
-                        #  Foreground
-                        with suppress(StopIteration):
-                            color_type = next(iter_codes)
-                            if color_type == 5:
-                                self.style += _Style.from_color(
-                                    from_ansi(next(iter_codes))
-                                )
-                            elif color_type == 2:
-                                self.style += _Style.from_color(
-                                    from_rgb(
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                    )
-                                )
-                    elif code == 48:
-                        # Background
-                        with suppress(StopIteration):
-                            color_type = next(iter_codes)
-                            if color_type == 5:
-                                self.style += _Style.from_color(
-                                    None, from_ansi(next(iter_codes))
-                                )
-                            elif color_type == 2:
-                                self.style += _Style.from_color(
-                                    None,
-                                    from_rgb(
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                        next(iter_codes),
-                                    ),
-                                )
+            _decode_ansi_token(self, text, plain_text, sgr, osc)
 
         return text
 
 
-if sys.platform != "win32" and __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":  # pragma: no cover
     import io
     import os
     import pty
     import sys
+
+    if sys.platform == "win32":
+        raise SystemExit(0)
 
     decoder = AnsiDecoder()
 

@@ -54,20 +54,20 @@ def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
         )
 
         # If any edges will be less than their minimum, replace size with the minimum
+        minimum_assigned = False
         for index, edge in flexible_edges:
             if portion * edge.ratio <= edge.minimum_size:
                 sizes[index] = edge.minimum_size
-                # New fixed size will invalidate calculations, so we need to repeat the process
+                minimum_assigned = True
                 break
-        else:
-            # Distribute flexible space and compensate for rounding error
-            # Since edge sizes can only be integers we need to add the remainder
-            # to the following line
-            remainder = _Fraction(0)
-            for index, edge in flexible_edges:
-                size, remainder = divmod(portion * edge.ratio + remainder, 1)
-                sizes[index] = size
-            break
+        if minimum_assigned:
+            continue
+        # Distribute flexible space and compensate for rounding error
+        remainder = _Fraction(0)
+        for index, edge in flexible_edges:
+            size, remainder = divmod(portion * edge.ratio + remainder, 1)
+            sizes[index] = size
+        break
     # Sizes now contains integers only
     return cast(List[int], sizes)
 

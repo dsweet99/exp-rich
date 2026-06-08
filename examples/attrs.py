@@ -1,5 +1,3 @@
-from typing import List
-
 try:
     import attr
 except ImportError:
@@ -8,24 +6,22 @@ except ImportError:
     raise SystemExit()
 
 
-@attr.define
-class Point3D:
-    x: float
-    y: float
-    z: float = 0
-
-
-@attr.define
-class Triangle:
-    point1: Point3D
-    point2: Point3D
-    point3: Point3D
-
-
-@attr.define
-class Model:
-    name: str
-    triangles: List[Triangle] = attr.Factory(list)
+Point3D = attr.make_class(
+    "Point3D",
+    {"x": attr.field(), "y": attr.field(), "z": attr.field(default=0)},
+)
+Triangle = attr.make_class(
+    "Triangle",
+    {
+        "point1": attr.field(),
+        "point2": attr.field(),
+        "point3": attr.field(),
+    },
+)
+Model = attr.make_class(
+    "Model",
+    {"name": attr.field(), "triangles": attr.field(factory=list)},
+)
 
 
 if __name__ == "__main__":

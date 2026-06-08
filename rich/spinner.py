@@ -1,4 +1,6 @@
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from __future__ import annotations
+
+from typing import List, Optional, Union, cast, TYPE_CHECKING
 
 from ._spinners import SPINNERS
 from .measure import Measurement
@@ -6,8 +8,7 @@ from .table import Table
 from .text import Text
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType, RenderResult
-    from .style import StyleType
+    from ._types import Console, ConsoleOptions, RenderResult, RenderableType, StyleType
 
 
 class Spinner:
@@ -113,12 +114,13 @@ class Spinner:
         if speed:
             self._update_speed = speed
 
-
 if __name__ == "__main__":  # pragma: no cover
     from time import sleep
 
-    from .console import Group
-    from .live import Live
+    from ._pick import M_CONSOLE, M_LIVE, rich_module
+
+    Group = rich_module(M_CONSOLE).Group
+    Live = rich_module(M_LIVE).Live
 
     all_spinners = Group(
         *[

@@ -12,7 +12,7 @@ def test_repr():
     home = (ControlType.HOME, 0)
     assert (
         repr(Segment("foo", None, [home]))
-        == "Segment('foo', None, [(<ControlType.HOME: 3>, 0)])"
+        == "Segment('foo', None, [(3, 0)])"
     )
 
 

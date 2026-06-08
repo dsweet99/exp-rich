@@ -5,20 +5,17 @@ import os
 from datetime import datetime
 from logging import Handler, LogRecord
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional, Type, Union
+from typing import ClassVar, Iterable, List, Optional, Type, Union, TYPE_CHECKING
+
+from ._null_file import NullFile
+
+from .console import get_console
+from ._log_render import LogRender
+from .text import Text
 
 if TYPE_CHECKING:
-    from ._log_render import FormatTimeCallable
-    from .console import Console, ConsoleRenderable
-    from .highlighter import Highlighter
-    from .traceback import Traceback
+    from ._types import Console, ConsoleRenderable, FormatTimeCallable, Highlighter, Traceback
 
-from rich._null_file import NullFile
-
-from . import get_console
-from ._log_render import LogRender
-from .highlighter import ReprHighlighter
-from .text import Text
 
 
 class RichHandler(Handler):
@@ -66,7 +63,11 @@ class RichHandler(Handler):
         "TRACE",
         "PATCH",
     ]
-    HIGHLIGHTER_CLASS: ClassVar[Type[Highlighter]] = ReprHighlighter
+    @classmethod
+    def _default_highlighter_class(cls) -> Type["Highlighter"]:
+        from .highlighter import ReprHighlighter
+
+        return ReprHighlighter
 
     def __init__(
         self,
@@ -96,7 +97,7 @@ class RichHandler(Handler):
     ) -> None:
         super().__init__(level=level)
         self.console = console or get_console()
-        self.highlighter = highlighter or self.HIGHLIGHTER_CLASS()
+        self.highlighter = highlighter or self._default_highlighter_class()()
         self._log_render = LogRender(
             show_time=show_time,
             show_level=show_level,
@@ -135,6 +136,47 @@ class RichHandler(Handler):
         )
         return level_text
 
+    def _format_exc_message(self, record: LogRecord) -> str:
+        message = record.getMessage()
+        if not self.formatter:
+            return message
+        record.message = record.getMessage()
+        formatter = self.formatter
+        if hasattr(formatter, "usesTime") and formatter.usesTime():
+            record.asctime = formatter.formatTime(record, formatter.datefmt)
+        return formatter.formatMessage(record)
+
+    def _build_traceback(self, record: LogRecord):
+        exc_type, exc_value, exc_traceback = record.exc_info
+        assert exc_type is not None
+        assert exc_value is not None
+        from .traceback import Traceback
+
+        return Traceback.from_exception(
+            exc_type,
+            exc_value,
+            exc_traceback,
+            width=self.tracebacks_width,
+            code_width=self.tracebacks_code_width,
+            extra_lines=self.tracebacks_extra_lines,
+            theme=self.tracebacks_theme,
+            word_wrap=self.tracebacks_word_wrap,
+            show_locals=self.tracebacks_show_locals,
+            locals_max_length=self.locals_max_length,
+            locals_max_string=self.locals_max_string,
+            suppress=self.tracebacks_suppress,
+            max_frames=self.tracebacks_max_frames,
+        )
+
+    def _print_log(self, record: LogRecord, log_renderable: ConsoleRenderable) -> None:
+        if isinstance(self.console.file, NullFile):
+            self.handleError(record)
+            return
+        try:
+            self.console.print(log_renderable)
+        except Exception:
+            self.handleError(record)
+
     def emit(self, record: LogRecord) -> None:
         """Invoked by logging."""
         message = self.format(record)
@@ -144,48 +186,14 @@ class RichHandler(Handler):
             and record.exc_info
             and record.exc_info != (None, None, None)
         ):
-            exc_type, exc_value, exc_traceback = record.exc_info
-            assert exc_type is not None
-            assert exc_value is not None
-            from .traceback import Traceback
-
-            traceback = Traceback.from_exception(
-                exc_type,
-                exc_value,
-                exc_traceback,
-                width=self.tracebacks_width,
-                code_width=self.tracebacks_code_width,
-                extra_lines=self.tracebacks_extra_lines,
-                theme=self.tracebacks_theme,
-                word_wrap=self.tracebacks_word_wrap,
-                show_locals=self.tracebacks_show_locals,
-                locals_max_length=self.locals_max_length,
-                locals_max_string=self.locals_max_string,
-                suppress=self.tracebacks_suppress,
-                max_frames=self.tracebacks_max_frames,
-            )
-            message = record.getMessage()
-            if self.formatter:
-                record.message = record.getMessage()
-                formatter = self.formatter
-                if hasattr(formatter, "usesTime") and formatter.usesTime():
-                    record.asctime = formatter.formatTime(record, formatter.datefmt)
-                message = formatter.formatMessage(record)
+            traceback = self._build_traceback(record)
+            message = self._format_exc_message(record)
 
         message_renderable = self.render_message(record, message)
         log_renderable = self.render(
             record=record, traceback=traceback, message_renderable=message_renderable
         )
-        if isinstance(self.console.file, NullFile):
-            # Handles pythonw, where stdout/stderr are null, and we return NullFile
-            # instance from Console.file. In this case, we still want to make a log record
-            # even though we won't be writing anything to a file.
-            self.handleError(record)
-        else:
-            try:
-                self.console.print(log_renderable)
-            except Exception:
-                self.handleError(record)
+        self._print_log(record, log_renderable)
 
     def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
         """Render message text in to Text.

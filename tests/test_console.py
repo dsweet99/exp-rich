@@ -496,9 +496,11 @@ def test_justify_renderable_right() -> None:
     )
 
 
-class BrokenRenderable:
-    def __rich_console__(self, console, options):
-        pass
+BrokenRenderable = type(
+    "BrokenRenderable",
+    (),
+    {"__rich_console__": lambda self, console, options: None},
+)
 
 
 def test_render_broken_renderable() -> None:
@@ -654,14 +656,19 @@ def test_out() -> None:
     assert console.end_capture() == "foo bar.foo bar.foo bar.foo bar.foo barX"
 
 
-def test_render_group() -> None:
-    @group(fit=False)
+def _make_group_renderable(*, fit: bool):
+    @group(fit=fit)
     def renderable():
         yield "one"
         yield "two"
         yield "three"  # <- largest width of 5
         yield "four"
 
+    return renderable
+
+
+def test_render_group() -> None:
+    renderable = _make_group_renderable(fit=False)
     renderables = [renderable() for _ in range(4)]
     console = Console(width=42)
     min_width, _ = measure_renderables(console, console.options, renderables)
@@ -669,13 +676,7 @@ def test_render_group() -> None:
 
 
 def test_render_group_fit() -> None:
-    @group()
-    def renderable():
-        yield "one"
-        yield "two"
-        yield "three"  # <- largest width of 5
-        yield "four"
-
+    renderable = _make_group_renderable(fit=True)
     renderables = [renderable() for _ in range(4)]
 
     console = Console(width=42)
@@ -871,13 +872,16 @@ def test_print_newline_start() -> None:
 
 def test_is_terminal_broken_file() -> None:
     console = Console()
+    original_isatty = console.file.isatty
 
     def _mock_isatty():
         raise ValueError()
 
-    console.file.isatty = _mock_isatty
-
-    assert console.is_terminal == False
+    try:
+        console.file.isatty = _mock_isatty
+        assert console.is_terminal is False
+    finally:
+        console.file.isatty = original_isatty
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not relevant on Windows")
@@ -890,10 +894,11 @@ def test_reset_height() -> None:
     """Test height is reset when rendering complex renderables."""
 
     # https://github.com/Textualize/rich/issues/2042
-    class Panels:
-        def __rich_console__(self, console, options):
-            yield Panel("foo")
-            yield Panel("bar")
+    def _panels_rich_console(self, console, options):
+        yield Panel("foo")
+        yield Panel("bar")
+
+    Panels = type("Panels", (), {"__rich_console__": _panels_rich_console})
 
     console = Console(
         force_terminal=True,
@@ -1072,25 +1077,38 @@ def test_tty_interactive() -> None:
 def test_tty_compatible() -> None:
     """Check TTY_COMPATIBLE environment var."""
 
-    class FakeTTY:
-        """An file file-like which reports it is a TTY."""
+    def _fake_tty_init(self) -> None:
+        self.called_isatty = False
 
-        def __init__(self) -> None:
-            self.called_isatty = False
+    def _fake_tty_isatty(self) -> bool:
+        self.called_isatty = True
+        return True
 
-        def isatty(self) -> bool:
-            self.called_isatty = True
-            return True
+    def _fake_file_init(self) -> None:
+        self.called_isatty = False
 
-    class FakeFile:
-        """A file object that reports False for isatty"""
+    def _fake_file_isatty(self) -> bool:
+        self.called_isatty = True
+        return False
 
-        def __init__(self) -> None:
-            self.called_isatty = False
-
-        def isatty(self) -> bool:
-            self.called_isatty = True
-            return False
+    FakeTTY = type(
+        "FakeTTY",
+        (),
+        {
+            "__init__": _fake_tty_init,
+            "isatty": _fake_tty_isatty,
+            "__doc__": "An file file-like which reports it is a TTY.",
+        },
+    )
+    FakeFile = type(
+        "FakeFile",
+        (),
+        {
+            "__init__": _fake_file_init,
+            "isatty": _fake_file_isatty,
+            "__doc__": "A file object that reports False for isatty",
+        },
+    )
 
     # Console file is not a TTY
     console = Console(file=FakeFile())

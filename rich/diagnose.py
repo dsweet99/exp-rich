@@ -1,19 +1,22 @@
 import os
 import platform
 
-from rich import inspect
-from rich.console import Console, get_windows_console_features
-from rich.panel import Panel
-from rich.pretty import Pretty
+from ._pick import M_PRETTY, rich_module
+
+from .console import Console, get_windows_console_features
+from .panel import Panel
 
 
 def report() -> None:  # pragma: no cover
     """Print a report to the terminal with debugging information"""
-    console = Console()
-    inspect(console)
-    features = get_windows_console_features()
-    inspect(features)
+    from . import inspect as rich_inspect
 
+    console = Console()
+    rich_inspect(console)
+    features = get_windows_console_features()
+    rich_inspect(features)
+
+    Pretty = rich_module(M_PRETTY).Pretty
     env_names = (
         "CLICOLOR",
         "COLORTERM",

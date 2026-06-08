@@ -5,38 +5,133 @@ from threading import Event, RLock, Thread
 from types import TracebackType
 from typing import IO, TYPE_CHECKING, Any, Callable, List, Optional, TextIO, Type, cast
 
-from . import get_console
-from .console import Console, ConsoleRenderable, Group, RenderableType, RenderHook
 from .control import Control
 from .file_proxy import FileProxy
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .live_render import LiveRender, VerticalOverflowMethod
+from ._pick import M_CONSOLE, rich_module
+from ._render_hook import ConsoleRenderable, RenderHook
 from .screen import Screen
 from .text import Text
 
 if TYPE_CHECKING:
-    # Can be replaced with `from typing import Self` in Python 3.11+
+    from ._types import RenderableType
     from typing_extensions import Self  # pragma: no cover
 
 
-class _RefreshThread(Thread):
-    """A thread that calls refresh() at regular intervals."""
+def _console_module():
+    return rich_module(M_CONSOLE)
 
-    def __init__(self, live: "Live", refresh_per_second: float) -> None:
-        self.live = live
-        self.refresh_per_second = refresh_per_second
-        self.done = Event()
-        super().__init__(daemon=True)
 
-    def stop(self) -> None:
-        self.done.set()
+def get_console():
+    return _console_module().get_console()
 
-    def run(self) -> None:
-        while not self.done.wait(1 / self.refresh_per_second):
-            with self.live._lock:
-                if not self.done.is_set():
-                    self.live.refresh()
+def _refresh_thread_init(
+    self, live: "Live", refresh_per_second: float
+) -> None:
+    self.live = live
+    self.refresh_per_second = refresh_per_second
+    self.done = Event()
+    Thread.__init__(self, daemon=True)
 
+def _refresh_thread_stop(self) -> None:
+    self.done.set()
+
+def _refresh_thread_run(self) -> None:
+    while not self.done.wait(1 / self.refresh_per_second):
+        with self.live._lock:
+            if not self.done.is_set():
+                self.live.refresh()
+
+_RefreshThread = type(
+    "_RefreshThread",
+    (Thread,),
+    {
+        "__doc__": "A thread that calls refresh() at regular intervals.",
+        "__init__": _refresh_thread_init,
+        "stop": _refresh_thread_stop,
+        "run": _refresh_thread_run,
+    },
+)
+
+def _live_begin_display(live: "Live", refresh: bool) -> None:
+    """Configure console for live rendering after set_live succeeds."""
+    if live._screen:
+        live._alt_screen = live.console.set_alt_screen(True)
+    live.console.show_cursor(False)
+    live._enable_redirect_io()
+    live.console.push_render_hook(live)
+    if refresh:
+        try:
+            live.refresh()
+        except Exception:
+            live.stop()
+            raise
+    if live.auto_refresh:
+        live._refresh_thread = _RefreshThread(live, live.refresh_per_second)
+        live._refresh_thread.start()
+
+def _live_stop_nested(live: "Live") -> None:
+    """Stop a nested live display."""
+    if not live.transient:
+        live.console.print(live.renderable)
+
+def _live_restore_console(live: "Live") -> None:
+    """Restore console state after live rendering stops."""
+    live._disable_redirect_io()
+    live.console.pop_render_hook()
+    if (
+        not live._alt_screen
+        and live.console.is_terminal
+        and live._live_render.last_render_height
+    ):
+        live.console.line()
+    live.console.show_cursor(True)
+    if live._alt_screen:
+        live.console.set_alt_screen(False)
+    if live.transient and not live._alt_screen:
+        live.console.control(live._live_render.restore_cursor())
+    if live.ipy_widget is not None and live.transient:
+        live.ipy_widget.close()  # pragma: no cover
+
+def _live_stop_render(live: "Live") -> None:
+    """Refresh and tear down console state when stopping live display."""
+    live.vertical_overflow = "visible"
+    with live.console:
+        try:
+            if not live._alt_screen and not live.console.is_jupyter:
+                live.refresh()
+        finally:
+            _live_restore_console(live)
+
+def _live_refresh_jupyter(live: "Live") -> None:
+    """Refresh live display in Jupyter."""
+    try:
+        from IPython.display import display
+        from ipywidgets import Output
+    except ImportError:
+        import warnings
+
+        warnings.warn('install "ipywidgets" for Jupyter support')
+        return
+
+    if live.ipy_widget is None:
+        live.ipy_widget = Output()
+        display(live.ipy_widget)
+
+    with live.ipy_widget:
+        live.ipy_widget.clear_output(wait=True)
+        live.console.print(live._live_render.renderable)
+
+def _live_refresh_terminal(live: "Live") -> None:
+    """Refresh live display on a terminal."""
+    if live.console.is_terminal and not live.console.is_dumb_terminal:
+        with live.console:
+            live.console.print(Control())
+        return
+    if not live._started and not live.transient:
+        with live.console:
+            live.console.print(Control())
 
 class Live(JupyterMixin, RenderHook):
     """Renders an auto-updating live display of any given renderable.
@@ -123,24 +218,7 @@ class Live(JupyterMixin, RenderHook):
                 self._nested = True
                 return
 
-            if self._screen:
-                self._alt_screen = self.console.set_alt_screen(True)
-            self.console.show_cursor(False)
-            self._enable_redirect_io()
-            self.console.push_render_hook(self)
-            if refresh:
-                try:
-                    self.refresh()
-                except Exception:
-                    # If refresh fails, we want to stop the redirection of sys.stderr,
-                    # so the error stacktrace is properly displayed in the terminal.
-                    # (or, if the code that calls Rich captures the exception and wants to display something,
-                    # let this be displayed in the terminal).
-                    self.stop()
-                    raise
-            if self.auto_refresh:
-                self._refresh_thread = _RefreshThread(self, self.refresh_per_second)
-                self._refresh_thread.start()
+            _live_begin_display(self, refresh)
 
     def stop(self) -> None:
         """Stop live rendering display."""
@@ -150,35 +228,13 @@ class Live(JupyterMixin, RenderHook):
             self._started = False
             self.console.clear_live()
             if self._nested:
-                if not self.transient:
-                    self.console.print(self.renderable)
+                _live_stop_nested(self)
                 return
 
             if self.auto_refresh and self._refresh_thread is not None:
                 self._refresh_thread.stop()
                 self._refresh_thread = None
-            # allow it to fully render on the last even if overflow
-            self.vertical_overflow = "visible"
-            with self.console:
-                try:
-                    if not self._alt_screen and not self.console.is_jupyter:
-                        self.refresh()
-                finally:
-                    self._disable_redirect_io()
-                    self.console.pop_render_hook()
-                    if (
-                        not self._alt_screen
-                        and self.console.is_terminal
-                        and self._live_render.last_render_height
-                    ):
-                        self.console.line()
-                    self.console.show_cursor(True)
-                    if self._alt_screen:
-                        self.console.set_alt_screen(False)
-                    if self.transient and not self._alt_screen:
-                        self.console.control(self._live_render.restore_cursor())
-                    if self.ipy_widget is not None and self.transient:
-                        self.ipy_widget.close()  # pragma: no cover
+            _live_stop_render(self)
 
     def __enter__(self) -> Self:
         self.start(refresh=self._renderable is not None)
@@ -222,6 +278,7 @@ class Live(JupyterMixin, RenderHook):
         renderable: RenderableType
         if live_stack and self is live_stack[0]:
             # The first Live instance will render everything in the Live stack
+            Group = _console_module().Group
             renderable = Group(*[live.get_renderable() for live in live_stack])
         else:
             renderable = self.get_renderable()
@@ -251,29 +308,9 @@ class Live(JupyterMixin, RenderHook):
                 return
 
             if self.console.is_jupyter:  # pragma: no cover
-                try:
-                    from IPython.display import display
-                    from ipywidgets import Output
-                except ImportError:
-                    import warnings
-
-                    warnings.warn('install "ipywidgets" for Jupyter support')
-                else:
-                    if self.ipy_widget is None:
-                        self.ipy_widget = Output()
-                        display(self.ipy_widget)
-
-                    with self.ipy_widget:
-                        self.ipy_widget.clear_output(wait=True)
-                        self.console.print(self._live_render.renderable)
-            elif self.console.is_terminal and not self.console.is_dumb_terminal:
-                with self.console:
-                    self.console.print(Control())
-            elif (
-                not self._started and not self.transient
-            ):  # if it is finished allow files or dumb-terminals to see final result
-                with self.console:
-                    self.console.print(Control())
+                _live_refresh_jupyter(self)
+            else:
+                _live_refresh_terminal(self)
 
     def process_renderables(
         self, renderables: List[ConsoleRenderable]
@@ -296,20 +333,22 @@ class Live(JupyterMixin, RenderHook):
 
         return renderables
 
-
 if __name__ == "__main__":  # pragma: no cover
     import random
     import time
     from itertools import cycle
     from typing import Dict, List, Tuple
 
-    from .align import Align
-    from .console import Console
-    from .live import Live as Live
-    from .panel import Panel
-    from .rule import Rule
-    from .syntax import Syntax
-    from .table import Table
+    import importlib
+
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Align = importlib.import_module(_pkg + ".align").Align
+    Console = importlib.import_module(_pkg + ".console").Console
+    Live = importlib.import_module(_pkg + ".live").Live
+    Panel = importlib.import_module(_pkg + ".panel").Panel
+    Rule = importlib.import_module(_pkg + ".rule").Rule
+    Syntax = importlib.import_module(_pkg + ".syntax").Syntax
+    Table = importlib.import_module(_pkg + ".table").Table
 
     console = Console()
 

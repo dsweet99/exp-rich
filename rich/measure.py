@@ -1,11 +1,9 @@
+from __future__ import annotations
+
 from operator import itemgetter
-from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, Sequence
+from typing import Any, Callable, NamedTuple, Optional, Sequence
 
-from . import errors
-from .protocol import is_renderable, rich_cast
-
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType
+from .errors import NotRenderableError
 
 
 class Measurement(NamedTuple):
@@ -75,58 +73,66 @@ class Measurement(NamedTuple):
             measurement = measurement.with_maximum(max_width)
         return measurement
 
-    @classmethod
-    def get(
-        cls, console: "Console", options: "ConsoleOptions", renderable: "RenderableType"
-    ) -> "Measurement":
-        """Get a measurement for a renderable.
 
-        Args:
-            console (~rich.console.Console): Console instance.
-            options (~rich.console.ConsoleOptions): Console options.
-            renderable (RenderableType): An object that may be rendered with Rich.
+def _measurement_get(
+    cls: type[Measurement],
+    console: Any,
+    options: Any,
+    renderable: Any,
+) -> Measurement:
+    """Get a measurement for a renderable."""
+    from .protocol import is_renderable, rich_cast
 
-        Raises:
-            errors.NotRenderableError: If the object is not renderable.
-
-        Returns:
-            Measurement: Measurement object containing range of character widths required to render the object.
-        """
-        _max_width = options.max_width
-        if _max_width < 1:
-            return Measurement(0, 0)
-        if isinstance(renderable, str):
-            renderable = console.render_str(
-                renderable, markup=options.markup, highlight=False
+    _max_width = options.max_width
+    if _max_width < 1:
+        return Measurement(0, 0)
+    if isinstance(renderable, str):
+        renderable = console.render_str(
+            renderable, markup=options.markup, highlight=False
+        )
+    renderable = rich_cast(renderable)
+    if is_renderable(renderable):
+        get_console_width: Optional[Callable[[Any, Any], Measurement]] = getattr(renderable, "__rich_measure__", None)
+        if get_console_width is not None:
+            render_width = (
+                get_console_width(console, options)
+                .normalize()
+                .with_maximum(_max_width)
             )
-        renderable = rich_cast(renderable)
-        if is_renderable(renderable):
-            get_console_width: Optional[
-                Callable[["Console", "ConsoleOptions"], "Measurement"]
-            ] = getattr(renderable, "__rich_measure__", None)
-            if get_console_width is not None:
-                render_width = (
-                    get_console_width(console, options)
-                    .normalize()
-                    .with_maximum(_max_width)
-                )
-                if render_width.maximum < 1:
-                    return Measurement(0, 0)
-                return render_width.normalize()
-            else:
-                return Measurement(0, _max_width)
-        else:
-            raise errors.NotRenderableError(
-                f"Unable to get render width for {renderable!r}; "
-                "a str, Segment, or object with __rich_console__ method is required"
-            )
+            if render_width.maximum < 1:
+                return Measurement(0, 0)
+            return render_width.normalize()
+        return Measurement(0, _max_width)
+    raise NotRenderableError(
+        f"Unable to get render width for {renderable!r}; "
+        "a str, Segment, or object with __rich_console__ method is required"
+    )
+
+
+Measurement.get = classmethod(_measurement_get)  # type: ignore[method-assign]
+
+
+def measure_fixed_width(
+    width: Optional[int], options_max_width: int
+) -> Measurement:
+    """Measure a renderable with an optional fixed width."""
+    return (
+        Measurement(width, width)
+        if width is not None
+        else Measurement(4, options_max_width)
+    )
+
+
+def measure_fixed_width_bar(width: Optional[int], options: Any) -> Measurement:
+    """Measure a bar-like renderable with optional fixed width."""
+    return measure_fixed_width(width, options.max_width)
 
 
 def measure_renderables(
-    console: "Console",
-    options: "ConsoleOptions",
-    renderables: Sequence["RenderableType"],
-) -> "Measurement":
+    console: Any,
+    options: Any,
+    renderables: Sequence[Any],
+) -> Measurement:
     """Get a measurement that would fit a number of renderables.
 
     Args:

@@ -29,7 +29,10 @@ copyright = "Will McGugan"
 author = "Will McGugan"
 
 # The full version, including alpha/beta/rc tags
-release = Distribution.from_name("rich").version
+try:
+    release = Distribution.from_name("rich").version
+except Exception:
+    release = "0.0.0"
 
 
 # -- General configuration ---------------------------------------------------

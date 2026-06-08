@@ -1,4 +1,4 @@
-from rich._stack import Stack
+from rich._loop import Stack
 
 
 def test_stack():

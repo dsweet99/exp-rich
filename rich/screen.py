@@ -1,18 +1,13 @@
+from __future__ import annotations
+
 from typing import Optional, TYPE_CHECKING
 
 from .segment import Segment
 from .style import StyleType
 from ._loop import loop_last
 
-
 if TYPE_CHECKING:
-    from .console import (
-        Console,
-        ConsoleOptions,
-        RenderResult,
-        RenderableType,
-        Group,
-    )
+    from ._types import Console, ConsoleOptions, RenderResult, RenderableType
 
 
 class Screen:
@@ -31,8 +26,9 @@ class Screen:
         style: Optional[StyleType] = None,
         application_mode: bool = False,
     ) -> None:
-        from rich.console import Group
+        from ._pick import M_CONSOLE, rich_module
 
+        Group = rich_module(M_CONSOLE).Group
         self.renderable = Group(*renderables)
         self.style = style
         self.application_mode = application_mode

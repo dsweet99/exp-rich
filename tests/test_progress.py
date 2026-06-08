@@ -33,22 +33,33 @@ from rich.progress_bar import ProgressBar
 from rich.text import Text
 
 
-class MockClock:
-    """A clock that is manually advanced."""
+def _mock_clock_init(self, time=0.0, auto=True) -> None:
+    self.time = time
+    self.auto = auto
 
-    def __init__(self, time=0.0, auto=True) -> None:
-        self.time = time
-        self.auto = auto
 
-    def __call__(self) -> float:
-        try:
-            return self.time
-        finally:
-            if self.auto:
-                self.time += 1
+def _mock_clock_call(self) -> float:
+    try:
+        return self.time
+    finally:
+        if self.auto:
+            self.time += 1
 
-    def tick(self, advance: float = 1) -> None:
-        self.time += advance
+
+def _mock_clock_tick(self, advance: float = 1) -> None:
+    self.time += advance
+
+
+MockClock = type(
+    "MockClock",
+    (),
+    {
+        "__init__": _mock_clock_init,
+        "__call__": _mock_clock_call,
+        "tick": _mock_clock_tick,
+        "__doc__": "A clock that is manually advanced.",
+    },
+)
 
 
 def test_bar_columns():
@@ -81,8 +92,7 @@ def test_time_elapsed_column():
 
 
 def test_time_remaining_column():
-    class FakeTask(Task):
-        time_remaining = 60
+    FakeTask = type("FakeTask", (Task,), {"time_remaining": 60})
 
     column = TimeRemainingColumn()
     task = Task(1, "test", 100, 20, _get_time=lambda: 1.0)
@@ -644,6 +654,14 @@ def test_wrap_file() -> None:
         os.remove(filename)
 
 
+def _run_wrap_file_with_progress(progress: Progress, filename: str, total: int) -> None:
+    with progress:
+        with open(filename, "rb") as file:
+            task_id = progress.add_task("Reading", total=total)
+            with progress.wrap_file(file, task_id=task_id) as f:
+                assert f.read() == b"Hello, World!"
+
+
 def test_wrap_file_task_total() -> None:
     console = Console(
         file=io.StringIO(),
@@ -661,11 +679,7 @@ def test_wrap_file_task_total() -> None:
     with os.fdopen(fd, "wb") as f:
         total = f.write(b"Hello, World!")
     try:
-        with progress:
-            with open(filename, "rb") as file:
-                task_id = progress.add_task("Reading", total=total)
-                with progress.wrap_file(file, task_id=task_id) as f:
-                    assert f.read() == b"Hello, World!"
+        _run_wrap_file_with_progress(progress, filename, total)
     finally:
         os.remove(filename)
 

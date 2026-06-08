@@ -8,85 +8,111 @@ from rich.console import Console
 from inspect import Parameter
 
 
-@rich.repr.auto
-class Foo:
-    def __init__(self, foo: str, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
-
-    def __rich_repr__(self):
-        yield self.foo
-        yield None, self.foo,
-        yield "bar", self.bar, None
-        yield "egg", self.egg
+def _foo_init(self, foo: str, bar: Optional[int] = None, egg: int = 1):
+    self.foo = foo
+    self.bar = bar
+    self.egg = egg
 
 
-@rich.repr.auto
-class Egg:
-    def __init__(self, foo: str, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
+def _foo_rich_repr(self):
+    yield self.foo
+    yield None, self.foo,
+    yield "bar", self.bar, None
+    yield "egg", self.egg
 
 
-@rich.repr.auto
-class BrokenEgg:
-    def __init__(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.fubar = bar
-        self.egg = egg
+Foo = rich.repr.auto(
+    type(
+        "Foo",
+        (),
+        {"__init__": _foo_init, "__rich_repr__": _foo_rich_repr},
+    )
+)
 
 
-@rich.repr.auto(angular=True)
-class AngularEgg:
-    def __init__(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
-        self.foo = foo
-        self.bar = bar
-        self.egg = egg
+def _egg_init(self, foo: str, bar: Optional[int] = None, egg: int = 1):
+    self.foo = foo
+    self.bar = bar
+    self.egg = egg
 
 
-@rich.repr.auto
-class Bar(Foo):
-    def __rich_repr__(self):
-        yield (self.foo,)
-        yield None, self.foo,
-        yield "bar", self.bar, None
-        yield "egg", self.egg
-
-    __rich_repr__.angular = True
+Egg = rich.repr.auto(type("Egg", (), {"__init__": _egg_init}))
 
 
-class StupidClass:
-    def __init__(self, a):
-        self.a = a
-
-    def __eq__(self, other) -> bool:
-        if other is Parameter.empty:
-            return True
-        try:
-            return self.a == other.a
-        except Exception:
-            return False
-
-    def __ne__(self, other: object) -> bool:
-        return not self.__eq__(other)
+def _broken_egg_init(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
+    self.foo = foo
+    self.fubar = bar
+    self.egg = egg
 
 
-class NotStupid:
-    pass
+BrokenEgg = rich.repr.auto(type("BrokenEgg", (), {"__init__": _broken_egg_init}))
 
 
-@rich.repr.auto
-class Bird:
-    def __init__(
-        self, name, eats, fly=True, another=StupidClass(2), extinct=NotStupid()
-    ):
-        self.name = name
-        self.eats = eats
-        self.fly = fly
-        self.another = another
-        self.extinct = extinct
+def _angular_egg_init(self, foo: str, *, bar: Optional[int] = None, egg: int = 1):
+    self.foo = foo
+    self.bar = bar
+    self.egg = egg
+
+
+AngularEgg = rich.repr.auto(angular=True)(
+    type("AngularEgg", (), {"__init__": _angular_egg_init})
+)
+
+
+def _bar_rich_repr(self):
+    yield (self.foo,)
+    yield None, self.foo,
+    yield "bar", self.bar, None
+    yield "egg", self.egg
+
+
+Bar = rich.repr.auto(
+    type(
+        "Bar",
+        (Foo,),
+        {"__rich_repr__": _bar_rich_repr},
+    )
+)
+Bar.__rich_repr__.angular = True  # type: ignore[attr-defined]
+
+
+def _stupid_init(self, a):
+    self.a = a
+
+
+def _stupid_eq(self, other) -> bool:
+    if other is Parameter.empty:
+        return True
+    try:
+        return self.a == other.a
+    except Exception:
+        return False
+
+
+def _stupid_ne(self, other: object) -> bool:
+    return not self.__eq__(other)
+
+
+StupidClass = type(
+    "StupidClass",
+    (),
+    {"__init__": _stupid_init, "__eq__": _stupid_eq, "__ne__": _stupid_ne},
+)
+
+NotStupid = type("NotStupid", (), {})
+
+
+def _bird_init(
+    self, name, eats, fly=True, another=StupidClass(2), extinct=NotStupid()
+):
+    self.name = name
+    self.eats = eats
+    self.fly = fly
+    self.another = another
+    self.extinct = extinct
+
+
+Bird = rich.repr.auto(type("Bird", (), {"__init__": _bird_init}))
 
 
 def test_rich_repr() -> None:

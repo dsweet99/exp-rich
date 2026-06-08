@@ -5,7 +5,9 @@ The API that this module wraps is documented at https://docs.microsoft.com/en-us
 
 import ctypes
 import sys
-from typing import Any
+import time
+from ctypes import Structure, byref, wintypes
+from typing import IO, Any, Type, cast
 
 windll: Any = None
 if sys.platform == "win32":
@@ -13,12 +15,12 @@ if sys.platform == "win32":
 else:
     raise ImportError(f"{__name__} can only be imported on Windows")
 
-import time
-from ctypes import Structure, byref, wintypes
-from typing import IO, NamedTuple, Type, cast
 
-from rich.color import ColorSystem
-from rich.style import Style
+def _windows_color_system() -> Any:
+    color_module = sys.modules.get("rich.color")
+    if color_module is None:
+        return None
+    return color_module.ColorSystem.WINDOWS
 
 STDOUT = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
@@ -26,46 +28,57 @@ ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
 COORD = wintypes._COORD
 
 
-class LegacyWindowsError(Exception):
-    pass
+LegacyWindowsError = type(
+    "LegacyWindowsError", (Exception,), {"__doc__": "Legacy Windows console error."}
+)
 
 
-class WindowsCoordinates(NamedTuple):
-    """Coordinates in the Windows Console API are (y, x), not (x, y).
-    This class is intended to prevent that confusion.
-    Rows and columns are indexed from 0.
-    This class can be used in place of wintypes._COORD in arguments and argtypes.
-    """
-
-    row: int
-    col: int
-
-    @classmethod
-    def from_param(cls, value: "WindowsCoordinates") -> COORD:
-        """Converts a WindowsCoordinates into a wintypes _COORD structure.
-        This classmethod is internally called by ctypes to perform the conversion.
-
-        Args:
-            value (WindowsCoordinates): The input coordinates to convert.
-
-        Returns:
-            wintypes._COORD: The converted coordinates struct.
-        """
-        return COORD(value.col, value.row)
+def _windows_coordinates_init(self, row: int, col: int) -> None:
+    self.row = row
+    self.col = col
 
 
-class CONSOLE_SCREEN_BUFFER_INFO(Structure):
-    _fields_ = [
-        ("dwSize", COORD),
-        ("dwCursorPosition", COORD),
-        ("wAttributes", wintypes.WORD),
-        ("srWindow", wintypes.SMALL_RECT),
-        ("dwMaximumWindowSize", COORD),
-    ]
+def _windows_coordinates_from_param(cls, value: "WindowsCoordinates") -> COORD:
+    """Converts a WindowsCoordinates into a wintypes _COORD structure."""
+    return COORD(value.col, value.row)
 
 
-class CONSOLE_CURSOR_INFO(ctypes.Structure):
-    _fields_ = [("dwSize", wintypes.DWORD), ("bVisible", wintypes.BOOL)]
+def _windows_coordinates_repr(self) -> str:
+    return f"WindowsCoordinates(row={self.row!r}, col={self.col!r})"
+
+
+WindowsCoordinates = type(
+    "WindowsCoordinates",
+    (),
+    {
+        "__doc__": "Coordinates in the Windows Console API are (y, x), not (x, y).",
+        "__init__": _windows_coordinates_init,
+        "from_param": classmethod(_windows_coordinates_from_param),
+        "__repr__": _windows_coordinates_repr,
+    },
+)
+
+
+CONSOLE_SCREEN_BUFFER_INFO = type(
+    "CONSOLE_SCREEN_BUFFER_INFO",
+    (Structure,),
+    {
+        "_fields_": [
+            ("dwSize", COORD),
+            ("dwCursorPosition", COORD),
+            ("wAttributes", wintypes.WORD),
+            ("srWindow", wintypes.SMALL_RECT),
+            ("dwMaximumWindowSize", COORD),
+        ]
+    },
+)
+
+
+CONSOLE_CURSOR_INFO = type(
+    "CONSOLE_CURSOR_INFO",
+    (ctypes.Structure,),
+    {"_fields_": [("dwSize", wintypes.DWORD), ("bVisible", wintypes.BOOL)]},
+)
 
 
 _GetStdHandle = windll.kernel32.GetStdHandle
@@ -402,20 +415,21 @@ class LegacyWindowsTerm:
         self.write(text)
         self.flush()
 
-    def write_styled(self, text: str, style: Style) -> None:
+    def write_styled(self, text: str, style: Any) -> None:
         """Write styled text to the terminal.
 
         Args:
             text (str): The text to write
             style (Style): The style of the text
         """
+        windows_cs = _windows_color_system()
         color = style.color
         bgcolor = style.bgcolor
         if style.reverse:
             color, bgcolor = bgcolor, color
 
         if color:
-            fore = color.downgrade(ColorSystem.WINDOWS).number
+            fore = color.downgrade(windows_cs).number if windows_cs else color.number
             fore = fore if fore is not None else 7  # Default to ANSI 7: White
             if style.bold:
                 fore = fore | self.BRIGHT_BIT
@@ -426,7 +440,9 @@ class LegacyWindowsTerm:
             fore = self._default_fore
 
         if bgcolor:
-            back = bgcolor.downgrade(ColorSystem.WINDOWS).number
+            back = (
+                bgcolor.downgrade(windows_cs).number if windows_cs else bgcolor.number
+            )
             back = back if back is not None else 0  # Default to ANSI 0: Black
             back = self.ANSI_TO_WINDOWS[back]
         else:
@@ -572,12 +588,15 @@ class LegacyWindowsTerm:
         return int(cursor_info.dwSize)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     handle = GetStdHandle()
 
-    from rich.console import Console
-
-    console = Console()
+    console_module = sys.modules.get("rich.console")
+    style_module = sys.modules.get("rich.style")
+    if console_module is None or style_module is None:
+        raise RuntimeError("rich.console and rich.style must be imported first")
+    console = console_module.Console()
+    Style = style_module.Style
 
     term = LegacyWindowsTerm(sys.stdout)
     term.set_title("Win32 Console Examples")

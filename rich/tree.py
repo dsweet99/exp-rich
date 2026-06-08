@@ -1,14 +1,206 @@
-from typing import Iterator, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 from ._loop import loop_first, loop_last
 from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement
 from .segment import Segment
 from .style import Style, StyleStack, StyleType
 from .styled import Styled
 
 GuideType = Tuple[str, str, str, str]
+
+
+def _tree_make_guide(
+    tree: "Tree",
+    index: int,
+    style: Style,
+    options: ConsoleOptions,
+) -> Segment:
+    """Make a Segment for a level of the guide lines."""
+    if options.ascii_only:
+        line = tree.ASCII_GUIDES[index]
+    else:
+        guide = 1 if style.bold else (2 if style.underline2 else 0)
+        line = tree.TREE_GUIDES[0 if options.legacy_windows else guide][index]
+    return Segment(line, style)
+
+
+def _tree_yield_label_lines(
+    tree: "Tree",
+    console: Console,
+    options: ConsoleOptions,
+    node: "Tree",
+    prefix: List[Segment],
+    style: Style,
+    last: bool,
+    remove_guide_styles: Style,
+) -> "RenderResult":
+    """Yield rendered label lines for one tree node."""
+    renderable_lines = console.render_lines(
+        Styled(node.label, style),
+        options.update(
+            width=options.max_width - sum(level.cell_length for level in prefix),
+            highlight=tree.highlight,
+            height=None,
+        ),
+        pad=options.justify is not None,
+    )
+    new_line = Segment.line()
+    for first, line in loop_first(renderable_lines):
+        if prefix:
+            yield from Segment.apply_style(
+                prefix,
+                style.background_style,
+                post_style=remove_guide_styles,
+            )
+        yield from line
+        yield new_line
+        if first and prefix:
+            prefix[-1] = _tree_make_guide(
+                tree,
+                2 if last else 1,  # SPACE if last else CONTINUE
+                prefix[-1].style or Style.null(),
+                options,
+            )
+
+
+def _tree_push_expanded_child(
+    tree: "Tree",
+    options: ConsoleOptions,
+    node: "Tree",
+    last: bool,
+    levels: List[Segment],
+    guide_style: Style,
+    get_style: Callable[..., Style],
+    style_stack: StyleStack,
+    guide_style_stack: StyleStack,
+    stack: List[Iterator[Tuple[bool, "Tree"]]],
+) -> None:
+    """Push an expanded child tree onto the render stack."""
+    space, continue_, fork, end = range(4)
+    levels[-1] = _tree_make_guide(
+        tree,
+        space if last else continue_,
+        levels[-1].style or Style.null(),
+        options,
+    )
+    levels.append(
+        _tree_make_guide(
+            tree,
+            end if len(node.children) == 1 else fork,
+            guide_style,
+            options,
+        )
+    )
+    style_stack.push(get_style(node.style))
+    guide_style_stack.push(get_style(node.guide_style))
+    stack.append(iter(loop_last(node.children)))
+
+
+def _tree_finish_child(
+    tree: "Tree",
+    levels: List[Segment],
+    guide_style_stack: StyleStack,
+    style_stack: StyleStack,
+    null_style: Style,
+    options: ConsoleOptions,
+) -> None:
+    """Pop a finished child subtree from the walk state."""
+    levels.pop()
+    if not levels:
+        return
+    guide_style = levels[-1].style or null_style
+    levels[-1] = _tree_make_guide(tree, 1, guide_style, options)
+    guide_style_stack.pop()
+    style_stack.pop()
+
+
+def _tree_walk_render_node(
+    tree: "Tree",
+    console: Console,
+    options: ConsoleOptions,
+    node: "Tree",
+    last: bool,
+    levels: List[Segment],
+    get_style: Callable[..., Style],
+    style_stack: StyleStack,
+    remove_guide_styles: Style,
+    depth: int,
+) -> "RenderResult":
+    """Yield rendered label lines for the current tree node."""
+    if last:
+        levels[-1] = _tree_make_guide(
+            tree, 3, levels[-1].style or Style.null(), options
+        )
+    style = style_stack.current + get_style(node.style)
+    prefix = levels[(2 if tree.hide_root else 1) :]
+    if depth == 0 and tree.hide_root:
+        return
+    yield from _tree_yield_label_lines(
+        tree,
+        console,
+        options,
+        node,
+        prefix,
+        style,
+        last,
+        remove_guide_styles,
+    )
+
+
+def _tree_walk(
+    tree: "Tree", console: Console, options: ConsoleOptions
+) -> "RenderResult":
+    """Walk the tree and yield console segments."""
+    stack: List[Iterator[Tuple[bool, Tree]]] = []
+    get_style = console.get_style
+    null_style = Style.null()
+    guide_style = get_style(tree.guide_style, default="") or null_style
+    levels: List[Segment] = [_tree_make_guide(tree, 1, guide_style, options)]
+    stack.append(iter(loop_last([tree])))
+    guide_style_stack = StyleStack(get_style(tree.guide_style))
+    style_stack = StyleStack(get_style(tree.style))
+    remove_guide_styles = Style(bold=False, underline2=False)
+    depth = 0
+
+    while stack:
+        stack_node = stack.pop()
+        try:
+            last, node = next(stack_node)
+        except StopIteration:
+            _tree_finish_child(
+                tree, levels, guide_style_stack, style_stack, null_style, options
+            )
+            continue
+        stack.append(stack_node)
+        yield from _tree_walk_render_node(
+            tree,
+            console,
+            options,
+            node,
+            last,
+            levels,
+            get_style,
+            style_stack,
+            remove_guide_styles,
+            depth,
+        )
+        if node.expanded and node.children:
+            guide_style = guide_style_stack.current + get_style(node.guide_style)
+            _tree_push_expanded_child(
+                tree,
+                options,
+                node,
+                last,
+                levels,
+                guide_style,
+                get_style,
+                style_stack,
+                guide_style_stack,
+                stack,
+            )
+            depth += 1
 
 
 class Tree(JupyterMixin):
@@ -86,92 +278,7 @@ class Tree(JupyterMixin):
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
-        stack: List[Iterator[Tuple[bool, Tree]]] = []
-        pop = stack.pop
-        push = stack.append
-        new_line = Segment.line()
-
-        get_style = console.get_style
-        null_style = Style.null()
-        guide_style = get_style(self.guide_style, default="") or null_style
-        SPACE, CONTINUE, FORK, END = range(4)
-
-        _Segment = Segment
-
-        def make_guide(index: int, style: Style) -> Segment:
-            """Make a Segment for a level of the guide lines."""
-            if options.ascii_only:
-                line = self.ASCII_GUIDES[index]
-            else:
-                guide = 1 if style.bold else (2 if style.underline2 else 0)
-                line = self.TREE_GUIDES[0 if options.legacy_windows else guide][index]
-            return _Segment(line, style)
-
-        levels: List[Segment] = [make_guide(CONTINUE, guide_style)]
-        push(iter(loop_last([self])))
-
-        guide_style_stack = StyleStack(get_style(self.guide_style))
-        style_stack = StyleStack(get_style(self.style))
-        remove_guide_styles = Style(bold=False, underline2=False)
-
-        depth = 0
-
-        while stack:
-            stack_node = pop()
-            try:
-                last, node = next(stack_node)
-            except StopIteration:
-                levels.pop()
-                if levels:
-                    guide_style = levels[-1].style or null_style
-                    levels[-1] = make_guide(FORK, guide_style)
-                    guide_style_stack.pop()
-                    style_stack.pop()
-                continue
-            push(stack_node)
-            if last:
-                levels[-1] = make_guide(END, levels[-1].style or null_style)
-
-            guide_style = guide_style_stack.current + get_style(node.guide_style)
-            style = style_stack.current + get_style(node.style)
-            prefix = levels[(2 if self.hide_root else 1) :]
-            renderable_lines = console.render_lines(
-                Styled(node.label, style),
-                options.update(
-                    width=options.max_width
-                    - sum(level.cell_length for level in prefix),
-                    highlight=self.highlight,
-                    height=None,
-                ),
-                pad=options.justify is not None,
-            )
-
-            if not (depth == 0 and self.hide_root):
-                for first, line in loop_first(renderable_lines):
-                    if prefix:
-                        yield from _Segment.apply_style(
-                            prefix,
-                            style.background_style,
-                            post_style=remove_guide_styles,
-                        )
-                    yield from line
-                    yield new_line
-                    if first and prefix:
-                        prefix[-1] = make_guide(
-                            SPACE if last else CONTINUE, prefix[-1].style or null_style
-                        )
-
-            if node.expanded and node.children:
-                levels[-1] = make_guide(
-                    SPACE if last else CONTINUE, levels[-1].style or null_style
-                )
-                levels.append(
-                    make_guide(END if len(node.children) == 1 else FORK, guide_style)
-                )
-                style_stack.push(get_style(node.style))
-                guide_style_stack.push(get_style(node.guide_style))
-                push(iter(loop_last(node.children)))
-                depth += 1
+        yield from _tree_walk(self, console, options)
 
     def __rich_measure__(
         self, console: "Console", options: "ConsoleOptions"

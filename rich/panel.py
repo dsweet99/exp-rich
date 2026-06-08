@@ -1,17 +1,210 @@
-from typing import TYPE_CHECKING, Optional
+from __future__ import annotations
 
-from .align import AlignMethod
-from .box import ROUNDED, Box
+from typing import Optional, Union, TYPE_CHECKING
+
 from .cells import cell_len
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement, measure_renderables
-from .padding import Padding, PaddingDimensions
-from .segment import Segment
-from .style import Style, StyleType
-from .text import Text, TextType
+from ._padding_dims import PaddingDimensions, unpack_padding
+
+from ._pick import M_BOX, M_PADDING, M_SEGMENT, M_STYLE, M_TEXT, rich_module
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderableType, RenderResult
+    from ._types import Box, Console, ConsoleOptions, RenderResult, RenderableType, Style, Text
+
+
+AlignMethod = str
+StyleType = Union[str, "Style"]
+TextType = Union[str, "Text"]
+
+
+def _Segment():
+    return rich_module(M_SEGMENT).Segment
+
+
+def _Text():
+    return rich_module(M_TEXT).Text
+
+
+def _Style():
+    return rich_module(M_STYLE).Style
+
+
+def _panel_align_text(
+    console: "Console",
+    text: "Text",
+    width: int,
+    align: str,
+    character: str,
+    style: "Style",
+) -> "Text":
+    """Align title or subtitle text within a panel border."""
+    Text = _Text()
+    text = text.copy()
+    text.truncate(width)
+    excess_space = width - cell_len(text.plain)
+    if text.style:
+        text.stylize(console.get_style(text.style))
+    if not excess_space:
+        return text
+    if align == "left":
+        return Text.assemble(
+            text,
+            (character * excess_space, style),
+            no_wrap=True,
+            end="",
+        )
+    if align == "center":
+        left = excess_space // 2
+        return Text.assemble(
+            (character * left, style),
+            text,
+            (character * (excess_space - left), style),
+            no_wrap=True,
+            end="",
+        )
+    return Text.assemble(
+        (character * excess_space, style),
+        text,
+        no_wrap=True,
+        end="",
+    )
+
+
+def _panel_prepare_context(
+    panel: "Panel",
+    console: "Console",
+    options: "ConsoleOptions",
+) -> dict:
+    """Compute panel layout values shared by border rendering."""
+    _padding = unpack_padding(panel.padding)
+    if any(_padding):
+        Padding = rich_module(M_PADDING).Padding
+        renderable = Padding(panel.renderable, _padding)
+    else:
+        renderable = panel.renderable
+    style = console.get_style(panel.style)
+    border_style = style + console.get_style(panel.border_style)
+    width = (
+        options.max_width
+        if panel.width is None
+        else min(options.max_width, panel.width)
+    )
+    safe_box: bool = console.safe_box if panel.safe_box is None else panel.safe_box
+    box = panel.box.substitute(options, safe=safe_box)
+    title_text = panel._title
+    if title_text is not None:
+        title_text.stylize_before(border_style)
+    child_width = (
+        width - 2
+        if panel.expand
+        else console.measure(
+            renderable, options=options.update_width(width - 2)
+        ).maximum
+    )
+    child_height = panel.height or options.height or None
+    if child_height:
+        child_height -= 2
+    if title_text is not None:
+        child_width = min(
+            options.max_width - 2, max(child_width, title_text.cell_len + 2)
+        )
+    width = child_width + 2
+    child_options = options.update(
+        width=child_width, height=child_height, highlight=panel.highlight
+    )
+    lines = console.render_lines(renderable, child_options, style=style)
+    return {
+        "style": style,
+        "border_style": border_style,
+        "width": width,
+        "box": box,
+        "title_text": title_text,
+        "subtitle_text": panel._subtitle,
+        "child_options": child_options,
+        "lines": lines,
+    }
+
+
+def _panel_yield_top_border(
+    panel: "Panel",
+    console: "Console",
+    context: dict,
+) -> "RenderResult":
+    Segment = _Segment()
+    border_style = context["border_style"]
+    width = context["width"]
+    box = context["box"]
+    title_text = context["title_text"]
+    child_options = context["child_options"]
+    if title_text is None or width <= 4:
+        yield Segment(box.get_top([width - 2]), border_style)
+        return
+    title_text = _panel_align_text(
+        console, title_text, width - 4, panel.title_align, box.top, border_style
+    )
+    yield Segment(box.top_left + box.top, border_style)
+    yield from console.render(title_text, child_options.update_width(width - 4))
+    yield Segment(box.top + box.top_right, border_style)
+
+
+def _panel_yield_body_rows(context: dict) -> "RenderResult":
+    Segment = _Segment()
+    border_style = context["border_style"]
+    box = context["box"]
+    lines = context["lines"]
+    line_start = Segment(box.mid_left, border_style)
+    line_end = Segment(f"{box.mid_right}", border_style)
+    new_line = Segment.line()
+    for line in lines:
+        yield line_start
+        yield from line
+        yield line_end
+        yield new_line
+
+
+def _panel_yield_bottom_border(
+    panel: "Panel",
+    console: "Console",
+    context: dict,
+) -> "RenderResult":
+    Segment = _Segment()
+    border_style = context["border_style"]
+    width = context["width"]
+    box = context["box"]
+    subtitle_text = context["subtitle_text"]
+    child_options = context["child_options"]
+    if subtitle_text is not None:
+        subtitle_text.stylize_before(border_style)
+    if subtitle_text is None or width <= 4:
+        yield Segment(box.get_bottom([width - 2]), border_style)
+        return
+    subtitle_text = _panel_align_text(
+        console,
+        subtitle_text,
+        width - 4,
+        panel.subtitle_align,
+        box.bottom,
+        border_style,
+    )
+    yield Segment(box.bottom_left + box.bottom, border_style)
+    yield from console.render(subtitle_text, child_options.update_width(width - 4))
+    yield Segment(box.bottom + box.bottom_right, border_style)
+
+
+def _panel_rich_console_body(
+    panel: "Panel",
+    console: "Console",
+    options: "ConsoleOptions",
+) -> "RenderResult":
+    """Render a panel border and contents."""
+    Segment = _Segment()
+    context = _panel_prepare_context(panel, console, options)
+    yield from _panel_yield_top_border(panel, console, context)
+    yield Segment.line()
+    yield from _panel_yield_body_rows(context)
+    yield from _panel_yield_bottom_border(panel, console, context)
+    yield Segment.line()
 
 
 class Panel(JupyterMixin):
@@ -40,7 +233,7 @@ class Panel(JupyterMixin):
     def __init__(
         self,
         renderable: "RenderableType",
-        box: Box = ROUNDED,
+        box: Optional[Box] = None,
         *,
         title: Optional[TextType] = None,
         title_align: AlignMethod = "center",
@@ -55,6 +248,10 @@ class Panel(JupyterMixin):
         padding: PaddingDimensions = (0, 1),
         highlight: bool = False,
     ) -> None:
+        if box is None:
+            ROUNDED = rich_module(M_BOX).ROUNDED
+
+            box = ROUNDED
         self.renderable = renderable
         self.box = box
         self.title = title
@@ -74,7 +271,7 @@ class Panel(JupyterMixin):
     def fit(
         cls,
         renderable: "RenderableType",
-        box: Box = ROUNDED,
+        box: Optional[Box] = None,
         *,
         title: Optional[TextType] = None,
         title_align: AlignMethod = "center",
@@ -107,7 +304,8 @@ class Panel(JupyterMixin):
         )
 
     @property
-    def _title(self) -> Optional[Text]:
+    def _title(self) -> Optional["Text"]:
+        Text = _Text()
         if self.title:
             title_text = (
                 Text.from_markup(self.title)
@@ -123,7 +321,8 @@ class Panel(JupyterMixin):
         return None
 
     @property
-    def _subtitle(self) -> Optional[Text]:
+    def _subtitle(self) -> Optional["Text"]:
+        Text = _Text()
         if self.subtitle:
             subtitle_text = (
                 Text.from_markup(self.subtitle)
@@ -141,144 +340,13 @@ class Panel(JupyterMixin):
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
-        _padding = Padding.unpack(self.padding)
-        renderable = (
-            Padding(self.renderable, _padding) if any(_padding) else self.renderable
-        )
-        style = console.get_style(self.style)
-        border_style = style + console.get_style(self.border_style)
-        width = (
-            options.max_width
-            if self.width is None
-            else min(options.max_width, self.width)
-        )
-
-        safe_box: bool = console.safe_box if self.safe_box is None else self.safe_box
-        box = self.box.substitute(options, safe=safe_box)
-
-        def align_text(
-            text: Text, width: int, align: str, character: str, style: Style
-        ) -> Text:
-            """Gets new aligned text.
-
-            Args:
-                text (Text): Title or subtitle text.
-                width (int): Desired width.
-                align (str): Alignment.
-                character (str): Character for alignment.
-                style (Style): Border style
-
-            Returns:
-                Text: New text instance
-            """
-            text = text.copy()
-            text.truncate(width)
-            excess_space = width - cell_len(text.plain)
-            if text.style:
-                text.stylize(console.get_style(text.style))
-
-            if excess_space:
-                if align == "left":
-                    return Text.assemble(
-                        text,
-                        (character * excess_space, style),
-                        no_wrap=True,
-                        end="",
-                    )
-                elif align == "center":
-                    left = excess_space // 2
-                    return Text.assemble(
-                        (character * left, style),
-                        text,
-                        (character * (excess_space - left), style),
-                        no_wrap=True,
-                        end="",
-                    )
-                else:
-                    return Text.assemble(
-                        (character * excess_space, style),
-                        text,
-                        no_wrap=True,
-                        end="",
-                    )
-            return text
-
-        title_text = self._title
-        if title_text is not None:
-            title_text.stylize_before(border_style)
-
-        child_width = (
-            width - 2
-            if self.expand
-            else console.measure(
-                renderable, options=options.update_width(width - 2)
-            ).maximum
-        )
-        child_height = self.height or options.height or None
-        if child_height:
-            child_height -= 2
-        if title_text is not None:
-            child_width = min(
-                options.max_width - 2, max(child_width, title_text.cell_len + 2)
-            )
-
-        width = child_width + 2
-        child_options = options.update(
-            width=child_width, height=child_height, highlight=self.highlight
-        )
-        lines = console.render_lines(renderable, child_options, style=style)
-
-        line_start = Segment(box.mid_left, border_style)
-        line_end = Segment(f"{box.mid_right}", border_style)
-        new_line = Segment.line()
-        if title_text is None or width <= 4:
-            yield Segment(box.get_top([width - 2]), border_style)
-        else:
-            title_text = align_text(
-                title_text,
-                width - 4,
-                self.title_align,
-                box.top,
-                border_style,
-            )
-            yield Segment(box.top_left + box.top, border_style)
-            yield from console.render(title_text, child_options.update_width(width - 4))
-            yield Segment(box.top + box.top_right, border_style)
-
-        yield new_line
-        for line in lines:
-            yield line_start
-            yield from line
-            yield line_end
-            yield new_line
-
-        subtitle_text = self._subtitle
-        if subtitle_text is not None:
-            subtitle_text.stylize_before(border_style)
-
-        if subtitle_text is None or width <= 4:
-            yield Segment(box.get_bottom([width - 2]), border_style)
-        else:
-            subtitle_text = align_text(
-                subtitle_text,
-                width - 4,
-                self.subtitle_align,
-                box.bottom,
-                border_style,
-            )
-            yield Segment(box.bottom_left + box.bottom, border_style)
-            yield from console.render(
-                subtitle_text, child_options.update_width(width - 4)
-            )
-            yield Segment(box.bottom + box.bottom_right, border_style)
-
-        yield new_line
+        yield from _panel_rich_console_body(self, console, options)
 
     def __rich_measure__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "Measurement":
         _title = self._title
-        _, right, _, left = Padding.unpack(self.padding)
+        _, right, _, left = unpack_padding(self.padding)
         padding = left + right
         renderables = [self.renderable, _title] if _title else [self.renderable]
 
@@ -298,12 +366,12 @@ class Panel(JupyterMixin):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from .console import Console
+    import importlib
 
-    c = Console()
-
-    from .box import DOUBLE, ROUNDED
-    from .padding import Padding
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    c = importlib.import_module(_pkg + ".console").Console()
+    DOUBLE = importlib.import_module(_pkg + ".box").DOUBLE
+    Padding = importlib.import_module(_pkg + ".padding").Padding
 
     p = Panel(
         "Hello, World!",

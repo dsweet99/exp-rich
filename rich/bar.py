@@ -2,7 +2,7 @@ from typing import Optional, Union
 
 from .color import Color
 from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
+from ._jupyter_mixin import JupyterMixin
 from .measure import Measurement
 from .segment import Segment
 from .style import Style
@@ -86,8 +86,6 @@ class Bar(JupyterMixin):
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions
     ) -> Measurement:
-        return (
-            Measurement(self.width, self.width)
-            if self.width is not None
-            else Measurement(4, options.max_width)
-        )
+        from .measure import measure_fixed_width
+
+        return measure_fixed_width(self.width, options.max_width)

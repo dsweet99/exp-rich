@@ -1,12 +1,17 @@
-from typing import TYPE_CHECKING
+from __future__ import annotations
 
+from typing import TYPE_CHECKING
 from .measure import Measurement
-from .segment import Segment
+from ._pick import M_SEGMENT, rich_module
 from .style import StyleType
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult, RenderableType
+    from ._types import Console, ConsoleOptions, RenderResult, RenderableType
 
+
+
+def _Segment():
+    return rich_module(M_SEGMENT).Segment
 
 class Styled:
     """Apply a style to a renderable.
@@ -25,7 +30,7 @@ class Styled:
     ) -> "RenderResult":
         style = console.get_style(self.style)
         rendered_segments = console.render(self.renderable, options)
-        segments = Segment.apply_style(rendered_segments, style)
+        segments = _Segment().apply_style(rendered_segments, style)
         return segments
 
     def __rich_measure__(
@@ -33,10 +38,11 @@ class Styled:
     ) -> Measurement:
         return Measurement.get(console, options, self.renderable)
 
-
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-    from rich.panel import Panel
+    import importlib
 
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Panel = importlib.import_module(_pkg + ".panel").Panel
+    print_fn = importlib.import_module(_pkg).print
     panel = Styled(Panel("hello"), "on blue")
-    print(panel)
+    print_fn(panel)

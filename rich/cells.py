@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from operator import itemgetter
-from typing import Callable, NamedTuple, Sequence, Tuple
+from typing import Callable, Tuple
 
+from rich._cell_table import CellTable
 from rich._unicode_data import load as load_cell_table
+
+__all__ = ["CellTable", "cell_len", "cached_cell_len", "set_cell_size"]
 
 CellSpan = Tuple[int, int, int]
 
@@ -33,14 +36,6 @@ _SINGLE_CELLS = frozenset(
 # When called with a string this will return True if all
 # characters are single-cell, otherwise False
 _is_single_cell_widths: Callable[[str], bool] = _SINGLE_CELLS.issuperset
-
-
-class CellTable(NamedTuple):
-    """Contains unicode data required to measure the cell widths of glyphs."""
-
-    unicode_version: str
-    widths: Sequence[tuple[int, int, int]]
-    narrow_to_wide: frozenset[str]
 
 
 @lru_cache(maxsize=4096)
@@ -133,29 +128,109 @@ def _cell_len(text: str, unicode_version: str) -> int:
         )
 
     cell_table = load_cell_table(unicode_version)
+    return _cell_len_special_characters(text, unicode_version, cell_table)
+
+
+def _cell_len_special_character_step(
+    character: str,
+    last_measured_character: str | None,
+    cell_table: object,
+    unicode_version: str,
+) -> tuple[int, str | None]:
+    """Process one codepoint in a special-character cell length walk."""
+    SPECIAL = {"\u200d", "\ufe0f"}
+    if character in SPECIAL:
+        if character == "\u200d":
+            return 0, last_measured_character
+        if last_measured_character:
+            return last_measured_character in cell_table.narrow_to_wide, None
+        return 0, None
+    if character_width := get_character_cell_size(character, unicode_version):
+        return character_width, character
+    return 0, last_measured_character
+
+
+def _cell_len_special_characters(
+    text: str, unicode_version: str, cell_table: object
+) -> int:
+    """Measure cell length for strings containing zero-width joiners or selectors."""
     total_width = 0
     last_measured_character: str | None = None
-
-    SPECIAL = {"\u200d", "\ufe0f"}
-
     index = 0
     character_count = len(text)
-
     while index < character_count:
         character = text[index]
-        if character in SPECIAL:
-            if character == "\u200d":
-                index += 1
-            elif last_measured_character:
-                total_width += last_measured_character in cell_table.narrow_to_wide
-                last_measured_character = None
-        else:
-            if character_width := get_character_cell_size(character, unicode_version):
-                last_measured_character = character
-                total_width += character_width
+        width_delta, last_measured_character = _cell_len_special_character_step(
+            character, last_measured_character, cell_table, unicode_version
+        )
+        total_width += width_delta
+        if character == "\u200d":
+            index += 1
         index += 1
-
     return total_width
+
+
+def _split_graphemes_zwj(
+    index: int,
+    codepoint_count: int,
+    spans: list[tuple[int, int, int]],
+) -> int:
+    """Extend the previous span across a zero-width joiner."""
+    index += 2 if index < (codepoint_count - 1) else 1
+    start, _end, cell_length = spans[-1]
+    spans[-1] = (start, index, cell_length)
+    return index
+
+
+def _split_graphemes_variation_selector(
+    index: int,
+    spans: list[tuple[int, int, int]],
+    last_measured_character: str | None,
+    cell_table: "CellTable",
+    total_width: int,
+) -> tuple[int, str | None, int]:
+    """Extend the previous span for a variation-selector character."""
+    index += 1
+    start, _end, cell_length = spans[-1]
+    if last_measured_character and last_measured_character in cell_table.narrow_to_wide:
+        last_measured_character = None
+        cell_length += 1
+        total_width += 1
+    spans[-1] = (start, index, cell_length)
+    return index, last_measured_character, total_width
+
+
+def _split_graphemes_special(
+    character: str,
+    index: int,
+    codepoint_count: int,
+    spans: list[tuple[int, int, int]],
+    last_measured_character: str | None,
+    cell_table: "CellTable",
+    total_width: int,
+) -> tuple[int, str | None, int]:
+    """Handle zero-width joiner and variation selector characters."""
+    if not spans:
+        spans.append((index, index := index + 1, 0))
+        return index, last_measured_character, total_width
+    if character == "\u200d":
+        return _split_graphemes_zwj(index, codepoint_count, spans), last_measured_character, total_width
+    return _split_graphemes_variation_selector(
+        index, spans, last_measured_character, cell_table, total_width
+    )
+
+
+def _split_graphemes_zero_width(
+    spans: list[tuple[int, int, int]],
+    index: int,
+) -> int:
+    """Associate a zero-width character with the previous grapheme."""
+    if spans:
+        start, _end, cell_length = spans[-1]
+        spans[-1] = (start, index := index + 1, cell_length)
+    else:
+        spans.append((index, index := index + 1, 0))
+    return index
 
 
 def split_graphemes(
@@ -185,34 +260,17 @@ def split_graphemes(
     spans: list[tuple[int, int, int]] = []
     SPECIAL = {"\u200d", "\ufe0f"}
     while index < codepoint_count:
-        if (character := text[index]) in SPECIAL:
-            if not spans:
-                # ZWJ or variation selector at the beginning of the string doesn't really make sense.
-                # But handle it, we must.
-                spans.append((index, index := index + 1, 0))
-                continue
-            if character == "\u200d":
-                # zero width joiner
-                # The condition handles the case where a ZWJ is at the end of the string, and has nothing to join
-                index += 2 if index < (codepoint_count - 1) else 1
-                start, _end, cell_length = spans[-1]
-                spans[-1] = (start, index, cell_length)
-            else:
-                # variation selector 16
-                index += 1
-                if last_measured_character:
-                    start, _end, cell_length = spans[-1]
-                    if last_measured_character in cell_table.narrow_to_wide:
-                        last_measured_character = None
-                        cell_length += 1
-                        total_width += 1
-                    spans[-1] = (start, index, cell_length)
-                else:
-                    # No previous character to change the size of.
-                    # Shouldn't occur in practice.
-                    # But handle it, we must.
-                    start, _end, cell_length = spans[-1]
-                    spans[-1] = (start, index, cell_length)
+        character = text[index]
+        if character in SPECIAL:
+            index, last_measured_character, total_width = _split_graphemes_special(
+                character,
+                index,
+                codepoint_count,
+                spans,
+                last_measured_character,
+                cell_table,
+                total_width,
+            )
             continue
 
         if character_width := get_character_cell_size(character, unicode_version):
@@ -220,14 +278,7 @@ def split_graphemes(
             spans.append((index, index := index + 1, character_width))
             total_width += character_width
         else:
-            # Character has zero width
-            if spans:
-                # zero width characters are associated with the previous character
-                start, _end, cell_length = spans[-1]
-                spans[-1] = (start, index := index + 1, cell_length)
-            else:
-                # A zero width character with no prior spans
-                spans.append((index, index := index + 1, 0))
+            index = _split_graphemes_zero_width(spans, index)
 
     return (spans, total_width)
 
@@ -255,7 +306,16 @@ def _split_text(
     # Guess initial offset
     offset = int((cell_position / cell_length) * len(spans))
     left_size = sum(map(_span_get_cell_len, spans[:offset]))
+    return _split_text_walk_spans(text, spans, cell_position, offset, left_size)
 
+
+def _split_text_walk_spans(
+    text: str,
+    spans: list,
+    cell_position: int,
+    offset: int,
+    left_size: int,
+) -> tuple[str, str]:
     while True:
         if left_size == cell_position:
             if offset >= len(spans):
@@ -268,12 +328,12 @@ def _split_text(
                 return text[:start] + " ", " " + text[end:]
             offset += 1
             left_size += cell_size
-        else:  # left_size > cell_position
-            start, end, cell_size = spans[offset - 1]
-            if left_size - cell_size < cell_position:
-                return text[:start] + " ", " " + text[end:]
-            offset -= 1
-            left_size -= cell_size
+            continue
+        start, end, cell_size = spans[offset - 1]
+        if left_size - cell_size < cell_position:
+            return text[:start] + " ", " " + text[end:]
+        offset -= 1
+        left_size -= cell_size
 
 
 def split_text(

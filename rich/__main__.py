@@ -5,7 +5,6 @@ from time import process_time
 from rich import box
 from rich.color import Color
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
-from rich.markdown import Markdown
 from rich.measure import Measurement
 from rich.pretty import Pretty
 from rich.segment import Segment
@@ -36,13 +35,7 @@ class ColorBox:
         return Measurement(1, options.max_width)
 
 
-def make_test_card() -> Table:
-    """Get a renderable that demonstrates a number of features."""
-    table = Table.grid(padding=1, pad_edge=True)
-    table.title = "Rich features"
-    table.add_column("Feature", no_wrap=True, justify="center", style="bold red")
-    table.add_column("Demonstration")
-
+def _make_test_card_color_table() -> Table:
     color_table = Table(
         box=None,
         expand=False,
@@ -60,15 +53,10 @@ def make_test_card() -> Table:
         ),
         ColorBox(),
     )
+    return color_table
 
-    table.add_row("Colors", color_table)
 
-    table.add_row(
-        "Styles",
-        "All ansi styles: [bold]bold[/], [dim]dim[/], [italic]italic[/italic], [underline]underline[/], [strike]strikethrough[/], [reverse]reverse[/], and even [blink]blink[/].",
-    )
-
-    lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque in metus sed sapien ultricies pretium a at justo. Maecenas luctus velit et auctor maximus."
+def _make_test_card_lorem_table(lorem: str) -> Table:
     lorem_table = Table.grid(padding=1, collapse_padding=True)
     lorem_table.pad_edge = False
     lorem_table.add_row(
@@ -77,34 +65,10 @@ def make_test_card() -> Table:
         Text(lorem, justify="right", style="blue"),
         Text(lorem, justify="full", style="red"),
     )
-    table.add_row(
-        "Text",
-        Group(
-            Text.from_markup(
-                """Word wrap text. Justify [green]left[/], [yellow]center[/], [blue]right[/] or [red]full[/].\n"""
-            ),
-            lorem_table,
-        ),
-    )
+    return lorem_table
 
-    def comparison(renderable1: RenderableType, renderable2: RenderableType) -> Table:
-        table = Table(show_header=False, pad_edge=False, box=None, expand=True)
-        table.add_column("1", ratio=1)
-        table.add_column("2", ratio=1)
-        table.add_row(renderable1, renderable2)
-        return table
 
-    table.add_row(
-        "Asian\nlanguage\nsupport",
-        ":flag_for_china:  该库支持中文，日文和韩文文本！\n:flag_for_japan:  ライブラリは中国語、日本語、韓国語のテキストをサポートしています\n:flag_for_south_korea:  이 라이브러리는 중국어, 일본어 및 한국어 텍스트를 지원합니다",
-    )
-
-    markup_example = (
-        "[bold magenta]Rich[/] supports a simple [i]bbcode[/i]-like [b]markup[/b] for [yellow]color[/], [underline]style[/], and emoji! "
-        ":+1: :apple: :ant: :bear: :baguette_bread: :bus: "
-    )
-    table.add_row("Markup", markup_example)
-
+def _make_test_card_example_table() -> Table:
     example_table = Table(
         show_edge=False,
         show_header=True,
@@ -150,8 +114,56 @@ def make_test_card() -> Table:
         "$115,000,000",
         "$1,027,044,677",
     )
+    return example_table
 
-    table.add_row("Tables", example_table)
+
+def _make_test_card_comparison(
+    renderable1: RenderableType, renderable2: RenderableType
+) -> Table:
+    comparison_table = Table(show_header=False, pad_edge=False, box=None, expand=True)
+    comparison_table.add_column("1", ratio=1)
+    comparison_table.add_column("2", ratio=1)
+    comparison_table.add_row(renderable1, renderable2)
+    return comparison_table
+
+
+def make_test_card() -> Table:
+    """Get a renderable that demonstrates a number of features."""
+    table = Table.grid(padding=1, pad_edge=True)
+    table.title = "Rich features"
+    table.add_column("Feature", no_wrap=True, justify="center", style="bold red")
+    table.add_column("Demonstration")
+
+    table.add_row("Colors", _make_test_card_color_table())
+
+    table.add_row(
+        "Styles",
+        "All ansi styles: [bold]bold[/], [dim]dim[/], [italic]italic[/italic], [underline]underline[/], [strike]strikethrough[/], [reverse]reverse[/], and even [blink]blink[/].",
+    )
+
+    lorem = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Quisque in metus sed sapien ultricies pretium a at justo. Maecenas luctus velit et auctor maximus."
+    table.add_row(
+        "Text",
+        Group(
+            Text.from_markup(
+                """Word wrap text. Justify [green]left[/], [yellow]center[/], [blue]right[/] or [red]full[/].\n"""
+            ),
+            _make_test_card_lorem_table(lorem),
+        ),
+    )
+
+    table.add_row(
+        "Asian\nlanguage\nsupport",
+        ":flag_for_china:  该库支持中文，日文和韩文文本！\n:flag_for_japan:  ライブラリは中国語、日本語、韓国語のテキストをサポートしています\n:flag_for_south_korea:  이 라이브러리는 중국어, 일본어 및 한국어 텍스트를 지원합니다",
+    )
+
+    markup_example = (
+        "[bold magenta]Rich[/] supports a simple [i]bbcode[/i]-like [b]markup[/b] for [yellow]color[/], [underline]style[/], and emoji! "
+        ":+1: :apple: :ant: :bear: :baguette_bread: :bus: "
+    )
+    table.add_row("Markup", markup_example)
+
+    table.add_row("Tables", _make_test_card_example_table())
 
     code = '''\
 def iter_last(values: Iterable[T]) -> Iterable[Tuple[bool, T]]:
@@ -179,7 +191,7 @@ def iter_last(values: Iterable[T]) -> Iterable[Tuple[bool, T]]:
     }
     table.add_row(
         "Syntax\nhighlighting\n&\npretty\nprinting",
-        comparison(
+        _make_test_card_comparison(
             Syntax(code, "python3", line_numbers=True, indent_guides=True),
             Pretty(pretty_data, indent_guides=True),
         ),
@@ -195,8 +207,13 @@ Supports much of the *markdown* __syntax__!
 - Block quotes
 - Lists, and more...
     """
+    from rich.markdown import Markdown
+
     table.add_row(
-        "Markdown", comparison("[cyan]" + markdown_example, Markdown(markdown_example))
+        "Markdown",
+        _make_test_card_comparison(
+            "[cyan]" + markdown_example, Markdown(markdown_example)
+        ),
     )
 
     table.add_row(

@@ -5,10 +5,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-
-class Foo:
-    def __rich__(self) -> Text:
-        return Text("Foo")
+Foo = type("Foo", (), {"__rich__": lambda self: Text("Foo")})
 
 
 def test_rich_cast():
@@ -18,12 +15,14 @@ def test_rich_cast():
     assert console.file.getvalue() == "Foo\n"
 
 
-class Fake:
-    def __getattr__(self, name):
-        return 12
-
-    def __repr__(self) -> str:
-        return "Fake()"
+Fake = type(
+    "Fake",
+    (),
+    {
+        "__getattr__": lambda self, name: 12,
+        "__repr__": lambda self: "Fake()",
+    },
+)
 
 
 def test_rich_cast_fake():
@@ -51,13 +50,8 @@ def test_abc():
 
 
 def test_cast_deep():
-    class B:
-        def __rich__(self) -> Foo:
-            return Foo()
-
-    class A:
-        def __rich__(self) -> B:
-            return B()
+    B = type("B", (), {"__rich__": lambda self: Foo()})
+    A = type("A", (), {"__rich__": lambda self: B()})
 
     console = Console(file=io.StringIO())
     console.print(A())
@@ -65,19 +59,20 @@ def test_cast_deep():
 
 
 def test_cast_recursive():
-    class B:
-        def __rich__(self) -> "A":
-            return A()
+    def _b_rich(self):
+        return A()
 
-        def __repr__(self) -> str:
-            return "<B>"
+    def _b_repr(self):
+        return "<B>"
 
-    class A:
-        def __rich__(self) -> B:
-            return B()
+    def _a_rich(self):
+        return B()
 
-        def __repr__(self) -> str:
-            return "<A>"
+    def _a_repr(self):
+        return "<A>"
+
+    B = type("B", (), {"__rich__": _b_rich, "__repr__": _b_repr})
+    A = type("A", (), {"__rich__": _a_rich, "__repr__": _a_repr})
 
     console = Console(file=io.StringIO())
     console.print(A())

@@ -403,11 +403,13 @@ def test_split_spans():
     assert lines[1].spans == [Span(0, 5, "red"), Span(0, 5, "bold")]
 
 
-def test_divide():
+def test_divide_empty():
     lines = Text("foo").divide([])
     assert len(lines) == 1
     assert lines[0] == Text("foo")
 
+
+def test_divide_styled_chars():
     text = Text()
     text.append("foo", "bold")
     lines = text.divide([1, 2])
@@ -419,6 +421,8 @@ def test_divide():
     assert lines[1]._spans == [Span(0, 1, "bold")]
     assert lines[2]._spans == [Span(0, 1, "bold")]
 
+
+def test_divide_multicolor():
     text = Text()
     text.append("foo", "red")
     text.append("bar", "green")

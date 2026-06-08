@@ -1,3 +1,5 @@
+
+from ._pick import M_PRETTY, rich_module
 from abc import ABC, abstractmethod
 from itertools import islice
 from operator import itemgetter
@@ -17,9 +19,6 @@ from typing import (
 from ._ratio import ratio_resolve
 from .align import Align
 from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
 from .region import Region
 from .repr import Result, rich_repr
 from .segment import Segment
@@ -29,52 +28,63 @@ if TYPE_CHECKING:
     from rich.tree import Tree
 
 
-class LayoutRender(NamedTuple):
-    """An individual layout render."""
-
-    region: Region
-    render: List[List[Segment]]
-
+LayoutRender = NamedTuple(
+    "LayoutRender",
+    [("region", Region), ("render", List[List[Segment]])],
+)
 
 RegionMap = Dict["Layout", Region]
 RenderMap = Dict["Layout", LayoutRender]
 
+LayoutError = type(
+    "LayoutError", (Exception,), {"__doc__": "Layout related error."}
+)
 
-class LayoutError(Exception):
-    """Layout related error."""
+NoSplitter = type(
+    "NoSplitter", (LayoutError,), {"__doc__": "Requested splitter does not exist."}
+)
 
 
-class NoSplitter(LayoutError):
-    """Requested splitter does not exist."""
+def _placeholder_init(self, layout: "Layout", style: StyleType = "") -> None:
+    from .highlighter import ReprHighlighter
+
+    self.layout = layout
+    self.style = style
+    self.highlighter = ReprHighlighter()
 
 
-class _Placeholder:
-    """An internal renderable used as a Layout placeholder."""
+def _placeholder_rich_console(
+    self, console: Console, options: ConsoleOptions
+) -> RenderResult:
+    from .panel import Panel
 
-    highlighter = ReprHighlighter()
+    width = options.max_width
+    height = options.height or options.size.height
+    layout = self.layout
+    title = (
+        f"{layout.name!r} ({width} x {height})"
+        if layout.name
+        else f"({width} x {height})"
+    )
+    Pretty = rich_module(M_PRETTY).Pretty
+    yield Panel(
+        Align.center(Pretty(layout), vertical="middle"),
+        style=self.style,
+        title=self.highlighter(title),
+        border_style="blue",
+        height=height,
+    )
 
-    def __init__(self, layout: "Layout", style: StyleType = "") -> None:
-        self.layout = layout
-        self.style = style
 
-    def __rich_console__(
-        self, console: Console, options: ConsoleOptions
-    ) -> RenderResult:
-        width = options.max_width
-        height = options.height or options.size.height
-        layout = self.layout
-        title = (
-            f"{layout.name!r} ({width} x {height})"
-            if layout.name
-            else f"({width} x {height})"
-        )
-        yield Panel(
-            Align.center(Pretty(layout), vertical="middle"),
-            style=self.style,
-            title=self.highlighter(title),
-            border_style="blue",
-            height=height,
-        )
+_Placeholder = type(
+    "_Placeholder",
+    (),
+    {
+        "__doc__": "An internal renderable used as a Layout placeholder.",
+        "__init__": _placeholder_init,
+        "__rich_console__": _placeholder_rich_console,
+    },
+)
 
 
 class Splitter(ABC):
@@ -98,44 +108,60 @@ class Splitter(ABC):
         """
 
 
-class RowSplitter(Splitter):
-    """Split a layout region in to rows."""
-
-    name = "row"
-
-    def get_tree_icon(self) -> str:
-        return "[layout.tree.row]⬌"
-
-    def divide(
-        self, children: Sequence["Layout"], region: Region
-    ) -> Iterable[Tuple["Layout", Region]]:
-        x, y, width, height = region
-        render_widths = ratio_resolve(width, children)
-        offset = 0
-        _Region = Region
-        for child, child_width in zip(children, render_widths):
-            yield child, _Region(x + offset, y, child_width, height)
-            offset += child_width
+def _row_splitter_tree_icon(self) -> str:
+    return "[layout.tree.row]⬌"
 
 
-class ColumnSplitter(Splitter):
-    """Split a layout region in to columns."""
+def _row_splitter_divide(
+    self, children: Sequence["Layout"], region: Region
+) -> Iterable[Tuple["Layout", Region]]:
+    x, y, width, height = region
+    render_widths = ratio_resolve(width, children)
+    offset = 0
+    _Region = Region
+    for child, child_width in zip(children, render_widths):
+        yield child, _Region(x + offset, y, child_width, height)
+        offset += child_width
 
-    name = "column"
 
-    def get_tree_icon(self) -> str:
-        return "[layout.tree.column]⬍"
+RowSplitter = type(
+    "RowSplitter",
+    (Splitter,),
+    {
+        "__doc__": "Split a layout region in to rows.",
+        "name": "row",
+        "get_tree_icon": _row_splitter_tree_icon,
+        "divide": _row_splitter_divide,
+    },
+)
 
-    def divide(
-        self, children: Sequence["Layout"], region: Region
-    ) -> Iterable[Tuple["Layout", Region]]:
-        x, y, width, height = region
-        render_heights = ratio_resolve(height, children)
-        offset = 0
-        _Region = Region
-        for child, child_height in zip(children, render_heights):
-            yield child, _Region(x, y + offset, width, child_height)
-            offset += child_height
+
+def _column_splitter_tree_icon(self) -> str:
+    return "[layout.tree.column]⬍"
+
+
+def _column_splitter_divide(
+    self, children: Sequence["Layout"], region: Region
+) -> Iterable[Tuple["Layout", Region]]:
+    x, y, width, height = region
+    render_heights = ratio_resolve(height, children)
+    offset = 0
+    _Region = Region
+    for child, child_height in zip(children, render_heights):
+        yield child, _Region(x, y + offset, width, child_height)
+        offset += child_height
+
+
+ColumnSplitter = type(
+    "ColumnSplitter",
+    (Splitter,),
+    {
+        "__doc__": "Split a layout region in to columns.",
+        "name": "column",
+        "get_tree_icon": _column_splitter_tree_icon,
+        "divide": _column_splitter_divide,
+    },
+)
 
 
 @rich_repr
@@ -206,11 +232,10 @@ class Layout:
         """
         if self.name == name:
             return self
-        else:
-            for child in self._children:
-                named_layout = child.get(name)
-                if named_layout is not None:
-                    return named_layout
+        for child in self._children:
+            named_layout = child.get(name)
+            if named_layout is not None:
+                return named_layout
         return None
 
     def __getitem__(self, name: str) -> "Layout":
@@ -231,6 +256,7 @@ class Layout:
 
             table = Table.grid(padding=(0, 1, 0, 0))
 
+            Pretty = rich_module(M_PRETTY).Pretty
             text: RenderableType = (
                 Pretty(layout) if layout.visible else Styled(Pretty(layout), "dim")
             )

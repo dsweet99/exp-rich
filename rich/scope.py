@@ -1,14 +1,12 @@
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from __future__ import annotations
 
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
-from .table import Table
-from .text import Text, TextType
+from collections.abc import Mapping
+from ._pick import M_PANEL, M_PRETTY, M_TABLE, M_TEXT, rich_module
+from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .console import ConsoleRenderable, OverflowMethod
+    from ._types import ConsoleRenderable, OverflowMethod, TextType
+
 
 
 def render_scope(
@@ -38,6 +36,13 @@ def render_scope(
     Returns:
         ConsoleRenderable: A renderable object.
     """
+    from .highlighter import ReprHighlighter
+
+    Pretty = rich_module(M_PRETTY).Pretty
+    Panel = rich_module(M_PANEL).Panel
+    Table = rich_module(M_TABLE).Table
+    Text = rich_module(M_TEXT).Text
+
     highlighter = ReprHighlighter()
     items_table = Table.grid(padding=(0, 1), expand=False)
     items_table.add_column(justify="right")
@@ -74,7 +79,7 @@ def render_scope(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
+    from . import print
 
     print()
 

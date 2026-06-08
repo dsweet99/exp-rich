@@ -28,6 +28,15 @@ COLUMN_DATA = [
 ]
 
 
+def _print_columns_layout(
+    console: Console, columns: Columns, rule: str, **attributes: object
+) -> None:
+    for name, value in attributes.items():
+        setattr(columns, name, value)
+    console.rule(rule)
+    console.print(columns)
+
+
 def render():
     console = Console(file=io.StringIO(), width=100, legacy_windows=False)
 
@@ -36,26 +45,20 @@ def render():
     console.print(empty_columns)
     columns = Columns(COLUMN_DATA)
     columns.add_renderable("Myrmecophaga tridactyla")
-    console.rule("optimal")
-    console.print(columns)
-    console.rule("optimal, expand")
-    columns.expand = True
-    console.print(columns)
-    console.rule("column first, optimal")
-    columns.column_first = True
-    columns.expand = False
-    console.print(columns)
-    console.rule("column first, right to left")
-    columns.right_to_left = True
-    console.print(columns)
-    console.rule("equal columns, expand")
-    columns.equal = True
-    columns.expand = True
-    console.print(columns)
-    console.rule("fixed width")
-    columns.width = 16
-    columns.expand = False
-    console.print(columns)
+    _print_columns_layout(console, columns, "optimal")
+    _print_columns_layout(console, columns, "optimal, expand", expand=True)
+    _print_columns_layout(
+        console, columns, "column first, optimal", column_first=True, expand=False
+    )
+    _print_columns_layout(
+        console, columns, "column first, right to left", right_to_left=True
+    )
+    _print_columns_layout(
+        console, columns, "equal columns, expand", equal=True, expand=True
+    )
+    _print_columns_layout(
+        console, columns, "fixed width", width=16, expand=False
+    )
     console.print()
     render_result = console.file.getvalue()
     print(render_result)

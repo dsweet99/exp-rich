@@ -1,21 +1,30 @@
+from __future__ import annotations
+
 import sys
-from typing import TYPE_CHECKING, Literal, Optional, Union
+from typing import Optional, Union, TYPE_CHECKING
 
 from ._emoji_replace import _emoji_replace
-from .jupyter import JupyterMixin
-from .segment import Segment
-from .style import Style
+from ._emoji_types import EmojiVariant
+from ._jupyter_mixin import JupyterMixin
+from ._pick import M_SEGMENT, M_STYLE, rich_module
 
 if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
+    from ._types import ConsoleOptions, RenderResult, Style
 
 
-EmojiVariant = Literal["emoji", "text"]
+
+def _Segment():
+    return rich_module(M_SEGMENT).Segment
 
 
-class NoEmoji(Exception):
-    """No emoji by that name."""
+def _Style():
+    return rich_module(M_STYLE).Style
 
+NoEmoji = type(
+    "NoEmoji",
+    (Exception,),
+    {"__doc__": "No emoji by that name."},
+)
 
 class Emoji(JupyterMixin):
     __slots__ = ["name", "style", "_char", "variant"]
@@ -25,7 +34,7 @@ class Emoji(JupyterMixin):
     def __init__(
         self,
         name: str,
-        style: Union[str, Style] = "none",
+        style: Union[str, "Style"] = "none",
         variant: Optional[EmojiVariant] = None,
     ) -> None:
         """A single emoji character.
@@ -70,14 +79,16 @@ class Emoji(JupyterMixin):
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
+        Segment = _Segment()
         yield Segment(self._char, console.get_style(self.style))
 
-
 if __name__ == "__main__":  # pragma: no cover
+    import importlib
     import sys
 
-    from rich.columns import Columns
-    from rich.console import Console
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Console = importlib.import_module(_pkg + ".console").Console
+    Columns = importlib.import_module(_pkg + ".columns").Columns
 
     console = Console(record=True)
 

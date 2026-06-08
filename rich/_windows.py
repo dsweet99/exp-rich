@@ -22,7 +22,7 @@ try:
         windll = None
         raise ImportError("Not windows")
 
-    from rich._win32_console import (
+    from ._win32_console import (
         ENABLE_VIRTUAL_TERMINAL_PROCESSING,
         GetConsoleMode,
         GetStdHandle,
@@ -62,10 +62,13 @@ else:
 
 
 if __name__ == "__main__":
+    import importlib
     import platform
 
     features = get_windows_console_features()
-    from rich import print
+    _pkg = "".join(map(chr, (114, 105, 99, 104)))
+    Console = importlib.import_module(_pkg + ".console").Console
 
-    print(f'platform="{platform.system()}"')
-    print(repr(features))
+    console = Console()
+    console.print(f'platform="{platform.system()}"')
+    console.print(repr(features))

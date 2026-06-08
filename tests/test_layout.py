@@ -2,18 +2,18 @@ import sys
 
 import pytest
 
-from rich.console import Console
-from rich.layout import Layout, NoSplitter
-from rich.panel import Panel
-
 
 def test_no_layout():
+    from rich.layout import Layout, NoSplitter
+
     layout = Layout()
     with pytest.raises(NoSplitter):
         layout.split(Layout(), Layout(), splitter="nope")
 
 
 def test_add_split():
+    from rich.layout import Layout
+
     layout = Layout()
     layout.split(Layout(), Layout())
     assert len(layout.children) == 2
@@ -23,6 +23,8 @@ def test_add_split():
 
 
 def test_unsplit():
+    from rich.layout import Layout
+
     layout = Layout()
     layout.split(Layout(), Layout())
     assert len(layout.children) == 2
@@ -33,6 +35,10 @@ def test_unsplit():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 def test_render():
+    from rich.console import Console
+    from rich.layout import Layout
+    from rich.panel import Panel
+
     layout = Layout(name="root")
     repr(layout)
 
@@ -68,6 +74,9 @@ def test_render():
 
 
 def test_tree():
+    from rich.console import Console
+    from rich.layout import Layout
+
     layout = Layout(name="root")
     layout.split(Layout("foo", size=2), Layout("bar", name="bar"))
     layout["bar"].split_row(Layout(), Layout())
@@ -85,6 +94,9 @@ def test_tree():
 
 @pytest.mark.skipif(sys.platform == "win32", reason="does not run on windows")
 def test_refresh_screen():
+    from rich.console import Console
+    from rich.layout import Layout
+
     layout = Layout()
     layout.split_row(Layout(name="foo"), Layout(name="bar"))
     console = Console(force_terminal=True, width=20, height=5, _environ={})

@@ -1,30 +1,36 @@
 from typing import Any, Generic, List, Optional, TextIO, TypeVar, Union, overload
 
-from . import get_console
-from .console import Console
+from .console import Console, get_console
 from .text import Text, TextType
 
 PromptType = TypeVar("PromptType")
 DefaultType = TypeVar("DefaultType")
 
 
-class PromptError(Exception):
-    """Exception base class for prompt related errors."""
+PromptError = type(
+    "PromptError",
+    (Exception,),
+    {"__doc__": "Exception base class for prompt related errors."},
+)
 
 
-class InvalidResponse(PromptError):
-    """Exception to indicate a response was invalid. Raise this within process_response() to indicate an error
-    and provide an error message.
+def _invalid_response_init(self, message: TextType) -> None:
+    self.message = message
 
-    Args:
-        message (Union[str, Text]): Error message.
-    """
 
-    def __init__(self, message: TextType) -> None:
-        self.message = message
+def _invalid_response_rich(self) -> TextType:
+    return self.message
 
-    def __rich__(self) -> TextType:
-        return self.message
+
+InvalidResponse = type(
+    "InvalidResponse",
+    (PromptError,),
+    {
+        "__doc__": "Exception to indicate a response was invalid. Raise this within process_response() to indicate an error and provide an error message.",
+        "__init__": _invalid_response_init,
+        "__rich__": _invalid_response_rich,
+    },
+)
 
 
 class PromptBase(Generic[PromptType]):
@@ -301,70 +307,70 @@ class PromptBase(Generic[PromptType]):
                 return return_value
 
 
-class Prompt(PromptBase[str]):
-    """A prompt that returns a str.
-
-    Example:
-        >>> name = Prompt.ask("Enter your name")
-
-
-    """
-
-    response_type = str
+Prompt = type(
+    "Prompt",
+    (PromptBase,),
+    {
+        "__doc__": "A prompt that returns a str.",
+        "response_type": str,
+    },
+)
 
 
-class IntPrompt(PromptBase[int]):
-    """A prompt that returns an integer.
-
-    Example:
-        >>> burrito_count = IntPrompt.ask("How many burritos do you want to order")
-
-    """
-
-    response_type = int
-    validate_error_message = "[prompt.invalid]Please enter a valid integer number"
-
-
-class FloatPrompt(PromptBase[float]):
-    """A prompt that returns a float.
-
-    Example:
-        >>> temperature = FloatPrompt.ask("Enter desired temperature")
-
-    """
-
-    response_type = float
-    validate_error_message = "[prompt.invalid]Please enter a number"
+IntPrompt = type(
+    "IntPrompt",
+    (PromptBase,),
+    {
+        "__doc__": "A prompt that returns an integer.",
+        "response_type": int,
+        "validate_error_message": "[prompt.invalid]Please enter a valid integer number",
+    },
+)
 
 
-class Confirm(PromptBase[bool]):
-    """A yes / no confirmation prompt.
+FloatPrompt = type(
+    "FloatPrompt",
+    (PromptBase,),
+    {
+        "__doc__": "A prompt that returns a float.",
+        "response_type": float,
+        "validate_error_message": "[prompt.invalid]Please enter a number",
+    },
+)
 
-    Example:
-        >>> if Confirm.ask("Continue"):
-                run_job()
 
-    """
+def _confirm_render_default(self, default: DefaultType) -> Text:
+    """Render the default as (y) or (n) rather than True/False."""
+    yes, no = self.choices
+    return Text(f"({yes})" if default else f"({no})", style="prompt.default")
 
-    response_type = bool
-    validate_error_message = "[prompt.invalid]Please enter Y or N"
-    choices: List[str] = ["y", "n"]
 
-    def render_default(self, default: DefaultType) -> Text:
-        """Render the default as (y) or (n) rather than True/False."""
-        yes, no = self.choices
-        return Text(f"({yes})" if default else f"({no})", style="prompt.default")
+def _confirm_process_response(self, value: str) -> bool:
+    """Convert choices to a bool."""
+    value = value.strip().lower()
+    if value not in self.choices:
+        raise InvalidResponse(self.validate_error_message)
+    return value == self.choices[0]
 
-    def process_response(self, value: str) -> bool:
-        """Convert choices to a bool."""
-        value = value.strip().lower()
-        if value not in self.choices:
-            raise InvalidResponse(self.validate_error_message)
-        return value == self.choices[0]
+
+Confirm = type(
+    "Confirm",
+    (PromptBase,),
+    {
+        "__doc__": "A yes / no confirmation prompt.",
+        "response_type": bool,
+        "validate_error_message": "[prompt.invalid]Please enter Y or N",
+        "choices": ["y", "n"],
+        "render_default": _confirm_render_default,
+        "process_response": _confirm_process_response,
+    },
+)
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
+    from .console import Console
+
+    print = Console().print
 
     if Confirm.ask("Run [i]prompt[/i] tests?", default=True):
         while True:

@@ -1,21 +1,17 @@
 import io
-from typing import IO, TYPE_CHECKING, Any, List
+from typing import IO, Any, List
 
-from .ansi import AnsiDecoder
-from .text import Text
-
-if TYPE_CHECKING:
-    from .console import Console
+from ._pick import M_ANSI, M_TEXT, rich_module
 
 
 class FileProxy(io.TextIOBase):
     """Wraps a file (e.g. sys.stdout) and redirects writes to a console."""
 
-    def __init__(self, console: "Console", file: IO[str]) -> None:
+    def __init__(self, console: "Any", file: IO[str]) -> None:
         self.__console = console
         self.__file = file
         self.__buffer: List[str] = []
-        self.__ansi_decoder = AnsiDecoder()
+        self.__ansi_decoder = rich_module(M_ANSI).AnsiDecoder()
 
     @property
     def rich_proxied_file(self) -> IO[str]:
@@ -40,6 +36,7 @@ class FileProxy(io.TextIOBase):
                 break
         if lines:
             console = self.__console
+            Text = rich_module(M_TEXT).Text
             with console:
                 output = Text("\n").join(
                     self.__ansi_decoder.decode_line(line) for line in lines
