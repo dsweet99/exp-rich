@@ -1,10 +1,14 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import TYPE_CHECKING, Iterable, List, Literal
 
 
-from ._loop import loop_last
-
+loop_last = import_attr('rich._loop', 'loop_last')
 if TYPE_CHECKING:
     from rich.console import ConsoleOptions
+
+
 
 
 class Box:
@@ -112,6 +116,35 @@ class Box:
         append(self.top_right)
         return "".join(parts)
 
+    def _row_characters(
+        self, level: Literal["head", "row", "foot", "mid"]
+    ) -> tuple[str, str, str, str]:
+        """Return left, horizontal, cross, and right characters for a row level."""
+        if level == "head":
+            return (
+                self.head_row_left,
+                self.head_row_horizontal,
+                self.head_row_cross,
+                self.head_row_right,
+            )
+        if level == "row":
+            return (
+                self.row_left,
+                self.row_horizontal,
+                self.row_cross,
+                self.row_right,
+            )
+        if level == "mid":
+            return (self.mid_left, " ", self.mid_vertical, self.mid_right)
+        if level == "foot":
+            return (
+                self.foot_row_left,
+                self.foot_row_horizontal,
+                self.foot_row_cross,
+                self.foot_row_right,
+            )
+        raise ValueError("level must be 'head', 'row' or 'foot'")
+
     def get_row(
         self,
         widths: Iterable[int],
@@ -126,28 +159,7 @@ class Box:
         Returns:
             str: A string of box characters.
         """
-        if level == "head":
-            left = self.head_row_left
-            horizontal = self.head_row_horizontal
-            cross = self.head_row_cross
-            right = self.head_row_right
-        elif level == "row":
-            left = self.row_left
-            horizontal = self.row_horizontal
-            cross = self.row_cross
-            right = self.row_right
-        elif level == "mid":
-            left = self.mid_left
-            horizontal = " "
-            cross = self.mid_vertical
-            right = self.mid_right
-        elif level == "foot":
-            left = self.foot_row_left
-            horizontal = self.foot_row_horizontal
-            cross = self.foot_row_cross
-            right = self.foot_row_right
-        else:
-            raise ValueError("level must be 'head', 'row' or 'foot'")
+        left, horizontal, cross, right = self._row_characters(level)
 
         parts: List[str] = []
         append = parts.append
@@ -422,13 +434,13 @@ PLAIN_HEADED_SUBSTITUTIONS = {
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.columns import Columns
-    from rich.panel import Panel
+    Columns = import_attr('rich.columns', 'Columns')
+    Panel = import_attr('rich.panel', 'Panel')
+    Console = import_attr('rich.console', 'Console')
+    Table = import_attr('rich.table', 'Table')
+    Text = import_attr('rich.text', 'Text')
 
-    from . import box as box
-    from .console import Console
-    from .table import Table
-    from .text import Text
+    import rich.box as box
 
     console = Console(record=True)
 

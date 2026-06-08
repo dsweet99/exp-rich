@@ -1,3 +1,4 @@
+from ._lazy import import_attr
 import re
 from typing import Callable, Match, Optional
 
@@ -12,7 +13,7 @@ def _emoji_replace(
     _emoji_sub: _EmojiSubMethod = re.compile(r"(:(\S*?)(?:(?:\-)(emoji|text))?:)").sub,
 ) -> str:
     """Replace emoji code in text."""
-    from ._emoji_codes import EMOJI
+    EMOJI = import_attr('rich._emoji_codes', 'EMOJI')
 
     get_emoji = EMOJI.__getitem__
     variants = {"text": "\ufe0e", "emoji": "\ufe0f"}

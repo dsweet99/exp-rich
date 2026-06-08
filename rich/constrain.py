@@ -1,10 +1,14 @@
-from typing import Optional, TYPE_CHECKING
+from __future__ import annotations
 
-from .jupyter import JupyterMixin
-from .measure import Measurement
+from ._lazy import import_attr
+from typing import TYPE_CHECKING, Optional
 
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderableType, RenderResult
+
+
 
 
 class Constrain(JupyterMixin):

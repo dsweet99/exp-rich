@@ -1,14 +1,174 @@
-from typing import Iterator, List, Optional, Tuple
+from __future__ import annotations
 
-from ._loop import loop_first, loop_last
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
-from .style import Style, StyleStack, StyleType
-from .styled import Styled
+from ._lazy import import_attr
+from typing import Callable, Iterator, List, Optional, Tuple
+
+loop_first = import_attr('rich._loop', 'loop_first')
+loop_last = import_attr('rich._loop', 'loop_last')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderableType = import_attr('rich.console', 'RenderableType')
+RenderResult = import_attr('rich.console', 'RenderResult')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+StyleStack = import_attr('rich.style', 'StyleStack')
+StyleType = import_attr('rich.style', 'StyleType')
+Styled = import_attr('rich.styled', 'Styled')
 
 GuideType = Tuple[str, str, str, str]
+
+
+def _tree_make_guide(
+    tree: "Tree",
+    index: int,
+    style: Style,
+    *,
+    ascii_only: bool,
+    legacy_windows: bool,
+) -> Segment:
+    if ascii_only:
+        line = tree.ASCII_GUIDES[index]
+    else:
+        guide = 1 if style.bold else (2 if style.underline2 else 0)
+        line = tree.TREE_GUIDES[0 if legacy_windows else guide][index]
+    return Segment(line, style)
+
+
+def _tree_render_node(
+    node: "Tree",
+    *,
+    console: Console,
+    options: ConsoleOptions,
+    prefix: List[Segment],
+    style: Style,
+    highlight: bool,
+    remove_guide_styles: Style,
+    new_line: Segment,
+    last: bool,
+    hide_root: bool,
+    depth: int,
+    make_guide: Callable[..., Segment],
+) -> RenderResult:
+    if depth == 0 and hide_root:
+        return
+    renderable_lines = console.render_lines(
+        Styled(node.label, style),
+        options.update(
+            width=options.max_width - sum(level.cell_length for level in prefix),
+            highlight=highlight,
+            height=None,
+        ),
+        pad=options.justify is not None,
+    )
+    for first, line in loop_first(renderable_lines):
+        if prefix:
+            yield from Segment.apply_style(
+                prefix,
+                style.background_style,
+                post_style=remove_guide_styles,
+            )
+        yield from line
+        yield new_line
+        if first and prefix:
+            prefix[-1] = make_guide(
+                0 if last else 1,
+                prefix[-1].style or Style.null(),
+            )
+
+
+def _tree_pop_node(
+    stack_node: Iterator[Tuple[bool, "Tree"]],
+    *,
+    levels: List[Segment],
+    guide_style_stack: StyleStack,
+    style_stack: StyleStack,
+    make_guide: Callable[..., Segment],
+    null_style: Style,
+    FORK: int,
+) -> Optional[Tuple[bool, "Tree"]]:
+    try:
+        return next(stack_node)
+    except StopIteration:
+        levels.pop()
+        if levels:
+            guide_style = levels[-1].style or null_style
+            levels[-1] = make_guide(FORK, guide_style)
+            guide_style_stack.pop()
+            style_stack.pop()
+        return None
+
+
+def _tree_walk_stack(
+    tree: "Tree",
+    *,
+    stack: List[Iterator[Tuple[bool, Tree]]],
+    levels: List[Segment],
+    guide_style_stack: StyleStack,
+    style_stack: StyleStack,
+    console: Console,
+    options: ConsoleOptions,
+    remove_guide_styles: Style,
+    new_line: Segment,
+    make_guide: Callable[..., Segment],
+    get_style: Callable[..., Style],
+    null_style: Style,
+    SPACE: int,
+    CONTINUE: int,
+    FORK: int,
+    END: int,
+) -> RenderResult:
+    pop = stack.pop
+    push = stack.append
+    depth = 0
+    while stack:
+        stack_node = pop()
+        node_info = _tree_pop_node(
+            stack_node,
+            levels=levels,
+            guide_style_stack=guide_style_stack,
+            style_stack=style_stack,
+            make_guide=make_guide,
+            null_style=null_style,
+            FORK=FORK,
+        )
+        if node_info is None:
+            continue
+        last, node = node_info
+        push(stack_node)
+        if last:
+            levels[-1] = make_guide(END, levels[-1].style or null_style)
+
+        guide_style = guide_style_stack.current + get_style(node.guide_style)
+        style = style_stack.current + get_style(node.style)
+        prefix = levels[(2 if tree.hide_root else 1) :]
+        yield from _tree_render_node(
+            node,
+            console=console,
+            options=options,
+            prefix=prefix,
+            style=style,
+            highlight=tree.highlight,
+            remove_guide_styles=remove_guide_styles,
+            new_line=new_line,
+            last=last,
+            hide_root=tree.hide_root,
+            depth=depth,
+            make_guide=make_guide,
+        )
+
+        if node.expanded and node.children:
+            levels[-1] = make_guide(
+                SPACE if last else CONTINUE, levels[-1].style or null_style
+            )
+            levels.append(
+                make_guide(END if len(node.children) == 1 else FORK, guide_style)
+            )
+            style_stack.push(get_style(node.style))
+            guide_style_stack.push(get_style(node.guide_style))
+            push(iter(loop_last(node.children)))
+            depth += 1
 
 
 class Tree(JupyterMixin):
@@ -87,7 +247,6 @@ class Tree(JupyterMixin):
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
         stack: List[Iterator[Tuple[bool, Tree]]] = []
-        pop = stack.pop
         push = stack.append
         new_line = Segment.line()
 
@@ -96,16 +255,14 @@ class Tree(JupyterMixin):
         guide_style = get_style(self.guide_style, default="") or null_style
         SPACE, CONTINUE, FORK, END = range(4)
 
-        _Segment = Segment
-
         def make_guide(index: int, style: Style) -> Segment:
-            """Make a Segment for a level of the guide lines."""
-            if options.ascii_only:
-                line = self.ASCII_GUIDES[index]
-            else:
-                guide = 1 if style.bold else (2 if style.underline2 else 0)
-                line = self.TREE_GUIDES[0 if options.legacy_windows else guide][index]
-            return _Segment(line, style)
+            return _tree_make_guide(
+                self,
+                index,
+                style,
+                ascii_only=options.ascii_only,
+                legacy_windows=options.legacy_windows,
+            )
 
         levels: List[Segment] = [make_guide(CONTINUE, guide_style)]
         push(iter(loop_last([self])))
@@ -114,64 +271,24 @@ class Tree(JupyterMixin):
         style_stack = StyleStack(get_style(self.style))
         remove_guide_styles = Style(bold=False, underline2=False)
 
-        depth = 0
-
-        while stack:
-            stack_node = pop()
-            try:
-                last, node = next(stack_node)
-            except StopIteration:
-                levels.pop()
-                if levels:
-                    guide_style = levels[-1].style or null_style
-                    levels[-1] = make_guide(FORK, guide_style)
-                    guide_style_stack.pop()
-                    style_stack.pop()
-                continue
-            push(stack_node)
-            if last:
-                levels[-1] = make_guide(END, levels[-1].style or null_style)
-
-            guide_style = guide_style_stack.current + get_style(node.guide_style)
-            style = style_stack.current + get_style(node.style)
-            prefix = levels[(2 if self.hide_root else 1) :]
-            renderable_lines = console.render_lines(
-                Styled(node.label, style),
-                options.update(
-                    width=options.max_width
-                    - sum(level.cell_length for level in prefix),
-                    highlight=self.highlight,
-                    height=None,
-                ),
-                pad=options.justify is not None,
-            )
-
-            if not (depth == 0 and self.hide_root):
-                for first, line in loop_first(renderable_lines):
-                    if prefix:
-                        yield from _Segment.apply_style(
-                            prefix,
-                            style.background_style,
-                            post_style=remove_guide_styles,
-                        )
-                    yield from line
-                    yield new_line
-                    if first and prefix:
-                        prefix[-1] = make_guide(
-                            SPACE if last else CONTINUE, prefix[-1].style or null_style
-                        )
-
-            if node.expanded and node.children:
-                levels[-1] = make_guide(
-                    SPACE if last else CONTINUE, levels[-1].style or null_style
-                )
-                levels.append(
-                    make_guide(END if len(node.children) == 1 else FORK, guide_style)
-                )
-                style_stack.push(get_style(node.style))
-                guide_style_stack.push(get_style(node.guide_style))
-                push(iter(loop_last(node.children)))
-                depth += 1
+        yield from _tree_walk_stack(
+            self,
+            stack=stack,
+            levels=levels,
+            guide_style_stack=guide_style_stack,
+            style_stack=style_stack,
+            console=console,
+            options=options,
+            remove_guide_styles=remove_guide_styles,
+            new_line=new_line,
+            make_guide=make_guide,
+            get_style=get_style,
+            null_style=null_style,
+            SPACE=SPACE,
+            CONTINUE=CONTINUE,
+            FORK=FORK,
+            END=END,
+        )
 
     def __rich_measure__(
         self, console: "Console", options: "ConsoleOptions"
@@ -202,11 +319,11 @@ class Tree(JupyterMixin):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Group
-    from rich.markdown import Markdown
-    from rich.panel import Panel
-    from rich.syntax import Syntax
-    from rich.table import Table
+    Group = import_attr('rich.console', 'Group')
+    Markdown = import_attr('rich.markdown', 'Markdown')
+    Panel = import_attr('rich.panel', 'Panel')
+    Syntax = import_attr('rich.syntax', 'Syntax')
+    Table = import_attr('rich.table', 'Table')
 
     table = Table(row_styles=["", "dim"])
 

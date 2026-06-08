@@ -1,6 +1,9 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import Dict
 
-from .style import Style
+Style = import_attr('rich.style', 'Style')
 
 DEFAULT_STYLES: Dict[str, Style] = {
     "none": Style.null(),
@@ -176,9 +179,9 @@ if __name__ == "__main__":  # pragma: no cover
     import argparse
     import io
 
-    from rich.console import Console
-    from rich.table import Table
-    from rich.text import Text
+    Console = import_attr('rich.console', 'Console')
+    Table = import_attr('rich.table', 'Table')
+    Text = import_attr('rich.text', 'Text')
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--html", action="store_true", help="Export as HTML table")

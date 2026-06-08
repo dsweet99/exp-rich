@@ -1,25 +1,31 @@
 from __future__ import annotations
+from ._lazy import import_attr, import_submodule
 
 import sys
 from dataclasses import dataclass
-from typing import ClassVar, Iterable, get_args
+from typing import ClassVar, Iterable, List, get_args
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
-from rich.table import Table
+Table = import_attr('rich.table', 'Table')
 
-from . import box
-from ._loop import loop_first
-from ._stack import Stack
-from .console import Console, ConsoleOptions, JustifyMethod, RenderResult
-from .containers import Renderables
-from .jupyter import JupyterMixin
-from .rule import Rule
-from .segment import Segment
-from .style import Style, StyleStack
-from .syntax import Syntax
-from .text import Text, TextType
+box = import_submodule('rich.box')
+loop_first = import_attr('rich._loop', 'loop_first')
+Stack = import_attr('rich._stack', 'Stack')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+JustifyMethod = import_attr('rich.console', 'JustifyMethod')
+RenderResult = import_attr('rich.console', 'RenderResult')
+Renderables = import_attr('rich.containers', 'Renderables')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Rule = import_attr('rich.rule', 'Rule')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+StyleStack = import_attr('rich.style', 'StyleStack')
+Syntax = import_attr('rich.syntax', 'Syntax')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 
 
 class MarkdownElement:
@@ -510,6 +516,237 @@ class MarkdownContext:
         return style
 
 
+def _markdown_apply_text_token(
+    context: "MarkdownContext", token: Token, node_type: str
+) -> None:
+    if node_type == "text":
+        context.on_text(token.content, node_type)
+    elif node_type == "hardbreak":
+        context.on_text("\n", node_type)
+    elif node_type == "softbreak":
+        context.on_text(" ", node_type)
+
+
+def _markdown_apply_link_open(
+    markdown: "Markdown",
+    context: "MarkdownContext",
+    console: Console,
+    token: Token,
+) -> None:
+    href = str(token.attrs.get("href", ""))
+    if markdown.hyperlinks:
+        link_style = console.get_style("markdown.link_url", default="none")
+        link_style += Style(link=href)
+        context.enter_style(link_style)
+        return
+    context.stack.push(Link.create(markdown, token))
+
+
+def _markdown_apply_html_inline(
+    context: "MarkdownContext", console: Console, token: Token
+) -> bool:
+    if token.content == "<kbd>":
+        context.enter_style(console.get_style("markdown.kbd", default="bold"))
+        return True
+    if token.content == "</kbd>":
+        context.leave_style()
+        return True
+    return False
+
+
+def _markdown_apply_link_close(
+    markdown: "Markdown",
+    context: "MarkdownContext",
+    console: Console,
+    token: Token,
+    node_type: str,
+) -> None:
+    if markdown.hyperlinks:
+        context.leave_style()
+        return
+    element = context.stack.pop()
+    assert isinstance(element, Link)
+    link_style = console.get_style("markdown.link", default="none")
+    context.enter_style(link_style)
+    context.on_text(element.text.plain, node_type)
+    context.leave_style()
+    context.on_text(" (", node_type)
+    link_url_style = console.get_style("markdown.link_url", default="none")
+    context.enter_style(link_url_style)
+    context.on_text(element.href, node_type)
+    context.leave_style()
+    context.on_text(")", node_type)
+
+
+def _markdown_apply_inline_style(
+    context: "MarkdownContext",
+    token: Token,
+    tag: str,
+    *,
+    entering: bool,
+    exiting: bool,
+    self_closing: bool,
+    node_type: str,
+) -> None:
+    if entering:
+        context.enter_style(f"markdown.{tag}")
+        return
+    if exiting:
+        context.leave_style()
+        return
+    context.enter_style(f"markdown.{tag}")
+    if token.content:
+        context.on_text(token.content, node_type)
+    context.leave_style()
+
+
+def _markdown_collect_exiting_segments(
+    context: "MarkdownContext",
+    console: Console,
+    *,
+    new_line: bool,
+    new_line_segment: Segment,
+) -> tuple[List[Segment], bool]:
+    element = context.stack.pop()
+    should_render = not context.stack or (
+        context.stack and context.stack.top.on_child_close(context, element)
+    )
+    segments: List[Segment] = []
+    if should_render:
+        if new_line:
+            segments.append(new_line_segment)
+        segments.extend(console.render(element, context.options))
+    element.on_leave(context)
+    return segments, element.new_line
+
+
+def _markdown_collect_self_closing_segments(
+    context: "MarkdownContext",
+    console: Console,
+    element: MarkdownElement,
+    token: Token,
+    *,
+    node_type: str,
+    new_line: bool,
+    new_line_segment: Segment,
+) -> tuple[List[Segment], bool]:
+    context.stack.pop()
+    text = token.content
+    if text is not None:
+        element.on_text(context, text)
+    should_render = not context.stack or (
+        context.stack and context.stack.top.on_child_close(context, element)
+    )
+    if not should_render:
+        element.on_leave(context)
+        return [], element.new_line
+    segments: List[Segment] = []
+    if new_line and node_type != "inline":
+        segments.append(new_line_segment)
+    segments.extend(console.render(element, context.options))
+    element.on_leave(context)
+    return segments, element.new_line
+
+
+def _markdown_render_block_element(
+    markdown: "Markdown",
+    context: "MarkdownContext",
+    console: Console,
+    token: Token,
+    *,
+    node_type: str,
+    entering: bool,
+    exiting: bool,
+    self_closing: bool,
+    new_line: bool,
+    new_line_segment: Segment,
+) -> tuple[bool, RenderResult]:
+    element_class = markdown.elements.get(token.type) or UnknownElement
+    element = element_class.create(markdown, token)
+
+    if entering or self_closing:
+        context.stack.push(element)
+        element.on_enter(context)
+
+    segments_to_yield: List[Segment] = []
+    updated_new_line = new_line
+    if exiting:
+        segments_to_yield, updated_new_line = _markdown_collect_exiting_segments(
+            context, console, new_line=new_line, new_line_segment=new_line_segment
+        )
+    elif self_closing:
+        segments_to_yield, updated_new_line = _markdown_collect_self_closing_segments(
+            context,
+            console,
+            element,
+            token,
+            node_type=node_type,
+            new_line=new_line,
+            new_line_segment=new_line_segment,
+        )
+
+    def _gen() -> RenderResult:
+        yield from segments_to_yield
+
+    return updated_new_line, _gen()
+
+
+def _markdown_dispatch_token(
+    markdown: "Markdown",
+    context: "MarkdownContext",
+    console: Console,
+    token: Token,
+    *,
+    inline_style_tags: set[str],
+    new_line: bool,
+    new_line_segment: Segment,
+) -> tuple[bool, RenderResult]:
+    node_type = token.type
+    tag = token.tag
+    entering = token.nesting == 1
+    exiting = token.nesting == -1
+    self_closing = token.nesting == 0
+
+    if node_type in {"text", "hardbreak", "softbreak"}:
+        _markdown_apply_text_token(context, token, node_type)
+        return new_line, ()
+    if node_type == "link_open":
+        _markdown_apply_link_open(markdown, context, console, token)
+        return new_line, ()
+    if node_type == "html_inline":
+        if _markdown_apply_html_inline(context, console, token):
+            return new_line, ()
+        return new_line, ()
+    if node_type == "link_close":
+        _markdown_apply_link_close(markdown, context, console, token, node_type)
+        return new_line, ()
+    if tag in inline_style_tags and node_type not in {"fence", "code_block"}:
+        _markdown_apply_inline_style(
+            context,
+            token,
+            tag,
+            entering=entering,
+            exiting=exiting,
+            self_closing=self_closing,
+            node_type=node_type,
+        )
+        return new_line, ()
+
+    updated_new_line, block_output = _markdown_render_block_element(
+        markdown,
+        context,
+        console,
+        token,
+        node_type=node_type,
+        entering=entering,
+        exiting=exiting,
+        self_closing=self_closing,
+        new_line=new_line,
+        new_line_segment=new_line_segment,
+    )
+    return updated_new_line, block_output
+
+
 class Markdown(JupyterMixin):
     """A Markdown renderable.
 
@@ -595,113 +832,16 @@ class Markdown(JupyterMixin):
         _new_line_segment = Segment.line()
 
         for token in self._flatten_tokens(tokens):
-            node_type = token.type
-            tag = token.tag
-
-            entering = token.nesting == 1
-            exiting = token.nesting == -1
-            self_closing = token.nesting == 0
-
-            if node_type == "text":
-                context.on_text(token.content, node_type)
-            elif node_type == "hardbreak":
-                context.on_text("\n", node_type)
-            elif node_type == "softbreak":
-                context.on_text(" ", node_type)
-            elif node_type == "link_open":
-                href = str(token.attrs.get("href", ""))
-                if self.hyperlinks:
-                    link_style = console.get_style("markdown.link_url", default="none")
-                    link_style += Style(link=href)
-                    context.enter_style(link_style)
-                else:
-                    context.stack.push(Link.create(self, token))
-            elif node_type == "html_inline":
-                if token.content == "<kbd>":
-                    kbd_style = console.get_style("markdown.kbd", default="bold")
-                    context.enter_style(kbd_style)
-                elif token.content == "</kbd>":
-                    context.leave_style()
-                else:
-                    continue
-            elif node_type == "link_close":
-                if self.hyperlinks:
-                    context.leave_style()
-                else:
-                    element = context.stack.pop()
-                    assert isinstance(element, Link)
-                    link_style = console.get_style("markdown.link", default="none")
-                    context.enter_style(link_style)
-                    context.on_text(element.text.plain, node_type)
-                    context.leave_style()
-                    context.on_text(" (", node_type)
-                    link_url_style = console.get_style(
-                        "markdown.link_url", default="none"
-                    )
-                    context.enter_style(link_url_style)
-                    context.on_text(element.href, node_type)
-                    context.leave_style()
-                    context.on_text(")", node_type)
-            elif (
-                tag in inline_style_tags
-                and node_type != "fence"
-                and node_type != "code_block"
-            ):
-                if entering:
-                    # If it's an opening inline token e.g. strong, em, etc.
-                    # Then we move into a style context i.e. push to stack.
-                    context.enter_style(f"markdown.{tag}")
-                elif exiting:
-                    # If it's a closing inline style, then we pop the style
-                    # off of the stack, to move out of the context of it...
-                    context.leave_style()
-                else:
-                    # If it's a self-closing inline style e.g. `code_inline`
-                    context.enter_style(f"markdown.{tag}")
-                    if token.content:
-                        context.on_text(token.content, node_type)
-                    context.leave_style()
-            else:
-                # Map the markdown tag -> MarkdownElement renderable
-                element_class = self.elements.get(token.type) or UnknownElement
-                element = element_class.create(self, token)
-
-                if entering or self_closing:
-                    context.stack.push(element)
-                    element.on_enter(context)
-
-                if exiting:  # CLOSING tag
-                    element = context.stack.pop()
-
-                    should_render = not context.stack or (
-                        context.stack
-                        and context.stack.top.on_child_close(context, element)
-                    )
-
-                    if should_render:
-                        if new_line:
-                            yield _new_line_segment
-
-                        yield from console.render(element, context.options)
-                elif self_closing:  # SELF-CLOSING tags (e.g. text, code, image)
-                    context.stack.pop()
-                    text = token.content
-                    if text is not None:
-                        element.on_text(context, text)
-
-                    should_render = (
-                        not context.stack
-                        or context.stack
-                        and context.stack.top.on_child_close(context, element)
-                    )
-                    if should_render:
-                        if new_line and node_type != "inline":
-                            yield _new_line_segment
-                        yield from console.render(element, context.options)
-
-                if exiting or self_closing:
-                    element.on_leave(context)
-                    new_line = element.new_line
+            new_line, output = _markdown_dispatch_token(
+                self,
+                context,
+                console,
+                token,
+                inline_style_tags=inline_style_tags,
+                new_line=new_line,
+                new_line_segment=_new_line_segment,
+            )
+            yield from output
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -769,7 +909,7 @@ if __name__ == "__main__":  # pragma: no cover
     )
     args = parser.parse_args()
 
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     if args.path == "-":
         markdown_body = sys.stdin.read()

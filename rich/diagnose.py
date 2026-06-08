@@ -1,10 +1,14 @@
+from __future__ import annotations
+
+from ._lazy import import_attr, import_submodule
 import os
 import platform
 
-from rich import inspect
-from rich.console import Console, get_windows_console_features
-from rich.panel import Panel
-from rich.pretty import Pretty
+inspect = import_submodule('rich.inspect')
+Console = import_attr('rich.console', 'Console')
+get_windows_console_features = import_attr('rich.console', 'get_windows_console_features')
+Panel = import_attr('rich.panel', 'Panel')
+Pretty = import_attr('rich.pretty', 'Pretty')
 
 
 def report() -> None:  # pragma: no cover

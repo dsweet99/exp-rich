@@ -15,7 +15,7 @@ def test_null_file():
         assert not file.seekable()
         assert file.tell() == 0
         assert file.truncate() == 0
-        assert file.writable() == False
+        assert not file.writable()
         assert file.writelines([""]) is None
         assert next(file) == ""
         assert next(iter(file)) == ""

@@ -13,7 +13,7 @@ def test_span():
 
 def test_no_renderable():
     console = Console()
-    text = Text()
+    Text()
 
     with pytest.raises(NotRenderableError):
         Measurement.get(console, console.options, None)

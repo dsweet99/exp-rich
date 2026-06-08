@@ -1,4 +1,4 @@
-from rich.json import JSON
+from rich.json_format import JSON
 import datetime
 
 

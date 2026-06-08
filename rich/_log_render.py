@@ -1,14 +1,19 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from datetime import datetime
-from typing import Iterable, List, Optional, TYPE_CHECKING, Union, Callable
+from typing import TYPE_CHECKING, Iterable, List, Optional, Union, Callable
 
 
-from .text import Text, TextType
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 
+
+FormatTimeCallable = Callable[[datetime], Text]
 if TYPE_CHECKING:
     from .console import Console, ConsoleRenderable, RenderableType
     from .table import Table
 
-FormatTimeCallable = Callable[[datetime], Text]
 
 
 class LogRender:
@@ -40,8 +45,8 @@ class LogRender:
         line_no: Optional[int] = None,
         link_path: Optional[str] = None,
     ) -> "Table":
-        from .containers import Renderables
-        from .table import Table
+        Renderables = import_attr('rich.containers', 'Renderables')
+        Table = import_attr('rich.table', 'Table')
 
         output = Table.grid(padding=(0, 1))
         output.expand = True
@@ -53,41 +58,54 @@ class LogRender:
         if self.show_path and path:
             output.add_column(style="log.path")
         row: List["RenderableType"] = []
-        if self.show_time:
-            log_time = log_time or console.get_datetime()
-            time_format = time_format or self.time_format
-            if callable(time_format):
-                log_time_display = time_format(log_time)
-            else:
-                log_time_display = Text(log_time.strftime(time_format))
-            if log_time_display == self._last_time and self.omit_repeated_times:
-                row.append(Text(" " * len(log_time_display)))
-            else:
-                row.append(log_time_display)
-                self._last_time = log_time_display
+        self._append_time_column(row, console, log_time, time_format)
         if self.show_level:
             row.append(level)
 
         row.append(Renderables(renderables))
         if self.show_path and path:
-            path_text = Text()
-            path_text.append(
-                path, style=f"link file://{link_path}" if link_path else ""
-            )
-            if line_no:
-                path_text.append(":")
-                path_text.append(
-                    f"{line_no}",
-                    style=f"link file://{link_path}#{line_no}" if link_path else "",
-                )
-            row.append(path_text)
+            row.append(self._make_path_text(path, line_no, link_path))
 
         output.add_row(*row)
         return output
 
+    def _append_time_column(
+        self,
+        row: List["RenderableType"],
+        console: "Console",
+        log_time: Optional[datetime],
+        time_format: Optional[Union[str, FormatTimeCallable]],
+    ) -> None:
+        if not self.show_time:
+            return
+        log_time = log_time or console.get_datetime()
+        time_format = time_format or self.time_format
+        if callable(time_format):
+            log_time_display = time_format(log_time)
+        else:
+            log_time_display = Text(log_time.strftime(time_format))
+        if log_time_display == self._last_time and self.omit_repeated_times:
+            row.append(Text(" " * len(log_time_display)))
+        else:
+            row.append(log_time_display)
+            self._last_time = log_time_display
+
+    def _make_path_text(
+        self, path: str, line_no: Optional[int], link_path: Optional[str]
+    ) -> "Text":
+        path_text = Text()
+        path_text.append(path, style=f"link file://{link_path}" if link_path else "")
+        if line_no:
+            path_text.append(":")
+            path_text.append(
+                f"{line_no}",
+                style=f"link file://{link_path}#{line_no}" if link_path else "",
+            )
+        return path_text
+
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     c = Console()
     c.print("[on blue]Hello", justify="right")

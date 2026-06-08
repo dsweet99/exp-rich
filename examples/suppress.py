@@ -16,7 +16,7 @@ def hello(count):
     """Simple program that greets NAME for a total of COUNT times."""
     1 / 0
     for x in range(count):
-        click.echo(f"Hello {name}!")
+        click.echo(f"Hello {name}!")  # noqa: F821
 
 
 if __name__ == "__main__":

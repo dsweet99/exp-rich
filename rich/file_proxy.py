@@ -1,11 +1,15 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import io
-from typing import IO, TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, IO, Any, List
 
-from .ansi import AnsiDecoder
-from .text import Text
-
+AnsiDecoder = import_attr('rich.ansi', 'AnsiDecoder')
+Text = import_attr('rich.text', 'Text')
 if TYPE_CHECKING:
     from .console import Console
+
+
 
 
 class FileProxy(io.TextIOBase):

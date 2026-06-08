@@ -1,14 +1,19 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Optional, Tuple
 
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
-from .table import Table
-from .text import Text, TextType
-
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+Panel = import_attr('rich.panel', 'Panel')
+Pretty = import_attr('rich.pretty', 'Pretty')
+Table = import_attr('rich.table', 'Table')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 if TYPE_CHECKING:
     from .console import ConsoleRenderable, OverflowMethod
+
+
 
 
 def render_scope(
@@ -74,7 +79,7 @@ def render_scope(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
+    print = import_attr('rich', 'print')
 
     print()
 

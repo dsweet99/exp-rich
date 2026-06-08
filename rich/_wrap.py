@@ -1,10 +1,12 @@
 from __future__ import annotations
+from ._lazy import import_attr
 
 import re
-from typing import Iterable
+from typing import Callable, Iterable
 
-from ._loop import loop_last
-from .cells import cell_len, chop_cells
+loop_last = import_attr('rich._loop', 'loop_last')
+cell_len = import_attr('rich.cells', 'cell_len')
+chop_cells = import_attr('rich.cells', 'chop_cells')
 
 re_word = re.compile(r"\s*\S+\s*")
 
@@ -21,6 +23,45 @@ def words(text: str) -> Iterable[tuple[int, int, str]]:
         word = word_match.group(0)
         yield start, end, word
         word_match = re_word.match(text, end)
+
+
+def _fold_long_word(
+    word: str,
+    width: int,
+    start: int,
+    fold: bool,
+    append: Callable[[int], None],
+) -> int:
+    """Handle a word longer than the line width; return new cell offset."""
+    if fold:
+        folded_word = chop_cells(word, width=width)
+        for last, line in loop_last(folded_word):
+            if start:
+                append(start)
+            if last:
+                return cell_len(line)
+            start += len(line)
+        return 0
+    if start:
+        append(start)
+    return cell_len(word)
+
+
+def _handle_word_on_line(
+    word: str,
+    width: int,
+    start: int,
+    fold: bool,
+    cell_offset: int,
+    append: Callable[[int], None],
+) -> int:
+    """Place word on current line or start a new line; return new cell offset."""
+    word_length = cell_len(word.rstrip())
+    if word_length > width:
+        return _fold_long_word(word, width, start, fold, append)
+    if cell_offset and start:
+        append(start)
+    return cell_len(word)
 
 
 def divide_line(text: str, width: int, fold: bool = True) -> list[int]:
@@ -50,36 +91,15 @@ def divide_line(text: str, width: int, fold: bool = True) -> list[int]:
             # Simplest case - the word fits within the remaining width for this line.
             cell_offset += _cell_len(word)
         else:
-            # Not enough space remaining for this word on the current line.
-            if word_length > width:
-                # The word doesn't fit on any line, so we can't simply
-                # place it on the next line...
-                if fold:
-                    # Fold the word across multiple lines.
-                    folded_word = chop_cells(word, width=width)
-                    for last, line in loop_last(folded_word):
-                        if start:
-                            append(start)
-                        if last:
-                            cell_offset = _cell_len(line)
-                        else:
-                            start += len(line)
-                else:
-                    # Folding isn't allowed, so crop the word.
-                    if start:
-                        append(start)
-                    cell_offset = _cell_len(word)
-            elif cell_offset and start:
-                # The word doesn't fit within the remaining space on the current
-                # line, but it *can* fit on to the next (empty) line.
-                append(start)
-                cell_offset = _cell_len(word)
+            cell_offset = _handle_word_on_line(
+                word, width, start, fold, cell_offset, append
+            )
 
     return break_positions
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from .console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console(width=10)
     console.print("12345 abcdefghijklmnopqrstuvwyxzABCDEFGHIJKLMNOPQRSTUVWXYZ 12345")

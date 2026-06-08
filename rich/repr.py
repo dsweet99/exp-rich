@@ -1,3 +1,4 @@
+from ._lazy import import_attr
 from functools import partial
 from typing import (
     Any,
@@ -23,6 +24,42 @@ class ReprError(Exception):
     """An error occurred when attempting to build a repr."""
 
 
+def _append_repr_arg(repr_str: List[str], arg: Any) -> None:
+    """Append one __rich_repr__ argument to repr_str."""
+    append = repr_str.append
+    if not isinstance(arg, tuple):
+        append(repr(arg))
+        return
+    if len(arg) == 1:
+        append(repr(arg[0]))
+        return
+    key, value, *default = arg
+    if key is None:
+        append(repr(value))
+        return
+    if default and default[0] == value:
+        return
+    append(f"{key}={value!r}")
+
+
+def _yield_rich_repr_param(self: Any, param: Any) -> Result:
+    """Yield one __init__ parameter for auto_rich_repr."""
+    import inspect
+
+    if param.kind == inspect.Parameter.POSITIONAL_ONLY:
+        yield getattr(self, param.name)
+        return
+    if param.kind not in (
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        inspect.Parameter.KEYWORD_ONLY,
+    ):
+        return
+    if param.default is inspect.Parameter.empty:
+        yield getattr(self, param.name)
+        return
+    yield param.name, getattr(self, param.name), param.default
+
+
 @overload
 def auto(cls: Optional[Type[T]]) -> Type[T]:
     ...
@@ -42,27 +79,12 @@ def auto(
         def auto_repr(self: T) -> str:
             """Create repr string from __rich_repr__"""
             repr_str: List[str] = []
-            append = repr_str.append
-
             angular: bool = getattr(self.__rich_repr__, "angular", False)  # type: ignore[attr-defined]
             for arg in self.__rich_repr__():  # type: ignore[attr-defined]
-                if isinstance(arg, tuple):
-                    if len(arg) == 1:
-                        append(repr(arg[0]))
-                    else:
-                        key, value, *default = arg
-                        if key is None:
-                            append(repr(value))
-                        else:
-                            if default and default[0] == value:
-                                continue
-                            append(f"{key}={value!r}")
-                else:
-                    append(repr(arg))
+                _append_repr_arg(repr_str, arg)
             if angular:
                 return f"<{self.__class__.__name__} {' '.join(repr_str)}>"
-            else:
-                return f"{self.__class__.__name__}({', '.join(repr_str)})"
+            return f"{self.__class__.__name__}({', '.join(repr_str)})"
 
         def auto_rich_repr(self: Type[T]) -> Result:
             """Auto generate __rich_rep__ from signature of __init__"""
@@ -71,16 +93,7 @@ def auto(
 
                 signature = inspect.signature(self.__init__)
                 for name, param in signature.parameters.items():
-                    if param.kind == param.POSITIONAL_ONLY:
-                        yield getattr(self, name)
-                    elif param.kind in (
-                        param.POSITIONAL_OR_KEYWORD,
-                        param.KEYWORD_ONLY,
-                    ):
-                        if param.default is param.empty:
-                            yield getattr(self, param.name)
-                        else:
-                            yield param.name, getattr(self, param.name), param.default
+                    yield from _yield_rich_repr_param(self, param)
             except Exception as error:
                 raise ReprError(
                     f"Failed to auto generate __rich_repr__; {error}"
@@ -131,7 +144,7 @@ if __name__ == "__main__":
             yield "buy", "hand sanitizer"
 
     foo = Foo()
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
 

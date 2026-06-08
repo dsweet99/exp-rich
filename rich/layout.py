@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from abc import ABC, abstractmethod
 from itertools import islice
 from operator import itemgetter
@@ -14,19 +17,24 @@ from typing import (
     Union,
 )
 
-from ._ratio import ratio_resolve
-from .align import Align
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .highlighter import ReprHighlighter
-from .panel import Panel
-from .pretty import Pretty
-from .region import Region
-from .repr import Result, rich_repr
-from .segment import Segment
-from .style import StyleType
-
+ratio_resolve = import_attr('rich._ratio', 'ratio_resolve')
+Align = import_attr('rich.align', 'Align')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderableType = import_attr('rich.console', 'RenderableType')
+RenderResult = import_attr('rich.console', 'RenderResult')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+Panel = import_attr('rich.panel', 'Panel')
+Pretty = import_attr('rich.pretty', 'Pretty')
+Region = import_attr('rich.region', 'Region')
+Result = import_attr('rich.repr', 'Result')
+rich_repr = import_attr('rich.repr', 'rich_repr')
+Segment = import_attr('rich.segment', 'Segment')
+StyleType = import_attr('rich.style', 'StyleType')
 if TYPE_CHECKING:
     from rich.tree import Tree
+
+
 
 
 class LayoutRender(NamedTuple):
@@ -206,11 +214,10 @@ class Layout:
         """
         if self.name == name:
             return self
-        else:
-            for child in self._children:
-                named_layout = child.get(name)
-                if named_layout is not None:
-                    return named_layout
+        for child in self._children:
+            named_layout = child.get(name)
+            if named_layout is not None:
+                return named_layout
         return None
 
     def __getitem__(self, name: str) -> "Layout":
@@ -222,9 +229,9 @@ class Layout:
     @property
     def tree(self) -> "Tree":
         """Get a tree renderable to show layout structure."""
-        from rich.styled import Styled
-        from rich.table import Table
-        from rich.tree import Tree
+        Styled = import_attr('rich.styled', 'Styled')
+        Table = import_attr('rich.table', 'Table')
+        Tree = import_attr('rich.tree', 'Tree')
 
         def summary(layout: "Layout") -> Table:
             icon = layout.splitter.get_tree_icon()
@@ -416,7 +423,7 @@ class Layout:
 
 
 if __name__ == "__main__":
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
     layout = Layout()

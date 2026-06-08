@@ -1,24 +1,26 @@
 from __future__ import annotations
+from ._lazy import import_attr
 
 import logging
 import os
 from datetime import datetime
 from logging import Handler, LogRecord
 from types import ModuleType
-from typing import TYPE_CHECKING, ClassVar, Iterable, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Iterable, List, Optional, Type, Union
 
+
+NullFile = import_attr('rich._null_file', 'NullFile')
+
+get_console = import_attr('rich._get_console', 'get_console')
+LogRender = import_attr('rich._log_render', 'LogRender')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+Text = import_attr('rich.text', 'Text')
 if TYPE_CHECKING:
     from ._log_render import FormatTimeCallable
     from .console import Console, ConsoleRenderable
     from .highlighter import Highlighter
     from .traceback import Traceback
 
-from rich._null_file import NullFile
-
-from . import get_console
-from ._log_render import LogRender
-from .highlighter import ReprHighlighter
-from .text import Text
 
 
 class RichHandler(Handler):
@@ -135,57 +137,70 @@ class RichHandler(Handler):
         )
         return level_text
 
-    def emit(self, record: LogRecord) -> None:
-        """Invoked by logging."""
-        message = self.format(record)
-        traceback = None
+    def _exc_traceback(self, record: LogRecord) -> Optional[Any]:
+        """Build a Rich traceback renderable from a log record, if applicable."""
         if (
-            self.rich_tracebacks
-            and record.exc_info
-            and record.exc_info != (None, None, None)
+            not self.rich_tracebacks
+            or not record.exc_info
+            or record.exc_info == (None, None, None)
         ):
-            exc_type, exc_value, exc_traceback = record.exc_info
-            assert exc_type is not None
-            assert exc_value is not None
-            from .traceback import Traceback
-
-            traceback = Traceback.from_exception(
-                exc_type,
-                exc_value,
-                exc_traceback,
-                width=self.tracebacks_width,
-                code_width=self.tracebacks_code_width,
-                extra_lines=self.tracebacks_extra_lines,
-                theme=self.tracebacks_theme,
-                word_wrap=self.tracebacks_word_wrap,
-                show_locals=self.tracebacks_show_locals,
-                locals_max_length=self.locals_max_length,
-                locals_max_string=self.locals_max_string,
-                suppress=self.tracebacks_suppress,
-                max_frames=self.tracebacks_max_frames,
-            )
-            message = record.getMessage()
-            if self.formatter:
-                record.message = record.getMessage()
-                formatter = self.formatter
-                if hasattr(formatter, "usesTime") and formatter.usesTime():
-                    record.asctime = formatter.formatTime(record, formatter.datefmt)
-                message = formatter.formatMessage(record)
-
-        message_renderable = self.render_message(record, message)
-        log_renderable = self.render(
-            record=record, traceback=traceback, message_renderable=message_renderable
+            return None
+        exc_type, exc_value, exc_traceback = record.exc_info
+        assert exc_type is not None
+        assert exc_value is not None
+        Traceback = import_attr("rich.traceback", "Traceback")
+        return Traceback.from_exception(
+            exc_type,
+            exc_value,
+            exc_traceback,
+            width=self.tracebacks_width,
+            code_width=self.tracebacks_code_width,
+            extra_lines=self.tracebacks_extra_lines,
+            theme=self.tracebacks_theme,
+            word_wrap=self.tracebacks_word_wrap,
+            show_locals=self.tracebacks_show_locals,
+            locals_max_length=self.locals_max_length,
+            locals_max_string=self.locals_max_string,
+            suppress=self.tracebacks_suppress,
+            max_frames=self.tracebacks_max_frames,
         )
+
+    def _format_record_message(self, record: LogRecord) -> str:
+        """Format log message, applying formatter when traceback is present."""
+        message = record.getMessage()
+        if not self.formatter:
+            return message
+        record.message = message
+        formatter = self.formatter
+        if hasattr(formatter, "usesTime") and formatter.usesTime():
+            record.asctime = formatter.formatTime(record, formatter.datefmt)
+        return formatter.formatMessage(record)
+
+    def _print_log_renderable(self, record: LogRecord, log_renderable: ConsoleRenderable) -> None:
+        """Print log renderable or delegate to handleError on failure."""
         if isinstance(self.console.file, NullFile):
             # Handles pythonw, where stdout/stderr are null, and we return NullFile
             # instance from Console.file. In this case, we still want to make a log record
             # even though we won't be writing anything to a file.
             self.handleError(record)
-        else:
-            try:
-                self.console.print(log_renderable)
-            except Exception:
-                self.handleError(record)
+            return
+        try:
+            self.console.print(log_renderable)
+        except Exception:
+            self.handleError(record)
+
+    def emit(self, record: LogRecord) -> None:
+        """Invoked by logging."""
+        message = self.format(record)
+        traceback = self._exc_traceback(record)
+        if traceback is not None:
+            message = self._format_record_message(record)
+
+        message_renderable = self.render_message(record, message)
+        log_renderable = self.render(
+            record=record, traceback=traceback, message_renderable=message_renderable
+        )
+        self._print_log_renderable(record, log_renderable)
 
     def render_message(self, record: LogRecord, message: str) -> ConsoleRenderable:
         """Render message text in to Text.
@@ -291,11 +306,10 @@ if __name__ == "__main__":  # pragma: no cover
     def divide() -> None:
         number = 1
         divisor = 0
-        foos = ["foo"] * 100
         log.debug("in divide")
         try:
             number / divisor
-        except:
+        except Exception:
             log.exception("An error of some kind occurred!")
 
     divide()

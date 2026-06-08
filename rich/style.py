@@ -1,15 +1,23 @@
+from __future__ import annotations
+
+from ._lazy import import_attr, import_submodule
 import sys
 from functools import lru_cache
 from itertools import count
 from operator import attrgetter
 from pickle import dumps, loads
 from random import getrandbits
-from typing import Any, Dict, Iterable, List, Optional, Type, Union, cast
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Type, Union, cast
 
-from . import errors
-from .color import Color, ColorParseError, ColorSystem, blend_rgb
-from .repr import Result, rich_repr
-from .terminal_theme import DEFAULT_TERMINAL_THEME, TerminalTheme
+errors = import_submodule('rich.errors')
+Color = import_attr('rich.color', 'Color')
+ColorParseError = import_attr('rich.color', 'ColorParseError')
+ColorSystem = import_attr('rich.color', 'ColorSystem')
+blend_rgb = import_attr('rich.color', 'blend_rgb')
+Result = import_attr('rich.repr', 'Result')
+rich_repr = import_attr('rich.repr', 'rich_repr')
+DEFAULT_TERMINAL_THEME = import_attr('rich.terminal_theme', 'DEFAULT_TERMINAL_THEME')
+TerminalTheme = import_attr('rich.terminal_theme', 'TerminalTheme')
 
 _hash_getter = attrgetter(
     "_color", "_bgcolor", "_attributes", "_set_attributes", "_link", "_meta"
@@ -291,55 +299,92 @@ class Style:
         """Get a link id, used in ansi code for links."""
         return self._link_id
 
+    def _style_definition_primary_attributes(
+        self, attributes: List[str], bits: int
+    ) -> None:
+        append = attributes.append
+        if bits & 1:
+            append("bold" if self.bold else "not bold")
+        if bits & (1 << 1):
+            append("dim" if self.dim else "not dim")
+        if bits & (1 << 2):
+            append("italic" if self.italic else "not italic")
+        if bits & (1 << 3):
+            append("underline" if self.underline else "not underline")
+
+    def _style_definition_blink_attributes(
+        self, attributes: List[str], bits: int
+    ) -> None:
+        append = attributes.append
+        if bits & (1 << 4):
+            append("blink" if self.blink else "not blink")
+        if bits & (1 << 5):
+            append("blink2" if self.blink2 else "not blink2")
+        if bits & (1 << 6):
+            append("reverse" if self.reverse else "not reverse")
+        if bits & (1 << 7):
+            append("conceal" if self.conceal else "not conceal")
+        if bits & (1 << 8):
+            append("strike" if self.strike else "not strike")
+
+    def _style_definition_extended_attributes(
+        self, attributes: List[str], bits: int
+    ) -> None:
+        append = attributes.append
+        if bits & (1 << 9):
+            append("underline2" if self.underline2 else "not underline2")
+        if bits & (1 << 10):
+            append("frame" if self.frame else "not frame")
+        if bits & (1 << 11):
+            append("encircle" if self.encircle else "not encircle")
+        if bits & (1 << 12):
+            append("overline" if self.overline else "not overline")
+
+    def _style_definition_text_attributes(self, attributes: List[str], bits: int) -> None:
+        if bits & 0b0000000001111:
+            self._style_definition_primary_attributes(attributes, bits)
+        if bits & 0b0000111110000:
+            self._style_definition_blink_attributes(attributes, bits)
+        if bits & 0b1111000000000:
+            self._style_definition_extended_attributes(attributes, bits)
+
     def __str__(self) -> str:
         """Re-generate style definition from attributes."""
         if self._style_definition is None:
             attributes: List[str] = []
-            append = attributes.append
-            bits = self._set_attributes
-            if bits & 0b0000000001111:
-                if bits & 1:
-                    append("bold" if self.bold else "not bold")
-                if bits & (1 << 1):
-                    append("dim" if self.dim else "not dim")
-                if bits & (1 << 2):
-                    append("italic" if self.italic else "not italic")
-                if bits & (1 << 3):
-                    append("underline" if self.underline else "not underline")
-            if bits & 0b0000111110000:
-                if bits & (1 << 4):
-                    append("blink" if self.blink else "not blink")
-                if bits & (1 << 5):
-                    append("blink2" if self.blink2 else "not blink2")
-                if bits & (1 << 6):
-                    append("reverse" if self.reverse else "not reverse")
-                if bits & (1 << 7):
-                    append("conceal" if self.conceal else "not conceal")
-                if bits & (1 << 8):
-                    append("strike" if self.strike else "not strike")
-            if bits & 0b1111000000000:
-                if bits & (1 << 9):
-                    append("underline2" if self.underline2 else "not underline2")
-                if bits & (1 << 10):
-                    append("frame" if self.frame else "not frame")
-                if bits & (1 << 11):
-                    append("encircle" if self.encircle else "not encircle")
-                if bits & (1 << 12):
-                    append("overline" if self.overline else "not overline")
+            self._style_definition_text_attributes(attributes, self._set_attributes)
             if self._color is not None:
-                append(self._color.name)
+                attributes.append(self._color.name)
             if self._bgcolor is not None:
-                append("on")
-                append(self._bgcolor.name)
+                attributes.extend(("on", self._bgcolor.name))
             if self._link:
-                append("link")
-                append(self._link)
+                attributes.extend(("link", self._link))
             self._style_definition = " ".join(attributes) or "none"
         return self._style_definition
 
     def __bool__(self) -> bool:
         """A Style is false if it has no attributes, colors, or links."""
         return not self._null
+
+    def _append_attribute_sgr(self, sgr: List[str], attributes: int) -> None:
+        append = sgr.append
+        _style_map = self._style_map
+        if attributes & 1:
+            append(_style_map[0])
+        if attributes & 2:
+            append(_style_map[1])
+        if attributes & 4:
+            append(_style_map[2])
+        if attributes & 8:
+            append(_style_map[3])
+        if attributes & 0b0000111110000:
+            for bit in range(4, 9):
+                if attributes & (1 << bit):
+                    append(_style_map[bit])
+        if attributes & 0b1111000000000:
+            for bit in range(9, 13):
+                if attributes & (1 << bit):
+                    append(_style_map[bit])
 
     def _make_ansi_codes(self, color_system: ColorSystem) -> str:
         """Generate ANSI codes for this style.
@@ -353,26 +398,9 @@ class Style:
 
         if self._ansi is None:
             sgr: List[str] = []
-            append = sgr.append
-            _style_map = self._style_map
             attributes = self._attributes & self._set_attributes
             if attributes:
-                if attributes & 1:
-                    append(_style_map[0])
-                if attributes & 2:
-                    append(_style_map[1])
-                if attributes & 4:
-                    append(_style_map[2])
-                if attributes & 8:
-                    append(_style_map[3])
-                if attributes & 0b0000111110000:
-                    for bit in range(4, 9):
-                        if attributes & (1 << bit):
-                            append(_style_map[bit])
-                if attributes & 0b1111000000000:
-                    for bit in range(9, 13):
-                        if attributes & (1 << bit):
-                            append(_style_map[bit])
+                self._append_attribute_sgr(sgr, attributes)
             if self._color is not None:
                 sgr.extend(self._color.downgrade(color_system).get_ansi_codes())
             if self._bgcolor is not None:
@@ -494,6 +522,90 @@ class Style:
         return style
 
     @classmethod
+    def _parse_style_on_word(
+        cls,
+        words: Iterator[str],
+        color: Optional[str],
+        link: Optional[str],
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        word = next(words, "")
+        if not word:
+            raise errors.StyleSyntaxError("color expected after 'on'")
+        try:
+            Color.parse(word)
+        except ColorParseError as error:
+            raise errors.StyleSyntaxError(
+                f"unable to parse {word!r} as background color; {error}"
+            ) from None
+        return color, word, link
+
+    @classmethod
+    def _parse_style_not_word(
+        cls,
+        words: Iterator[str],
+        attributes: Dict[str, Optional[Any]],
+        color: Optional[str],
+        bgcolor: Optional[str],
+        link: Optional[str],
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        word = next(words, "")
+        attribute = cls.STYLE_ATTRIBUTES.get(word)
+        if attribute is None:
+            raise errors.StyleSyntaxError(
+                f"expected style attribute after 'not', found {word!r}"
+            )
+        attributes[attribute] = False
+        return color, bgcolor, link
+
+    @classmethod
+    def _parse_style_link_word(
+        cls,
+        words: Iterator[str],
+        color: Optional[str],
+        bgcolor: Optional[str],
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        word = next(words, "")
+        if not word:
+            raise errors.StyleSyntaxError("URL expected after 'link'")
+        return color, bgcolor, word
+
+    @classmethod
+    def _parse_style_color_word(
+        cls, word: str, bgcolor: Optional[str]
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        try:
+            Color.parse(word)
+        except ColorParseError as error:
+            raise errors.StyleSyntaxError(
+                f"unable to parse {word!r} as color; {error}"
+            ) from None
+        return word, bgcolor, None
+
+    @classmethod
+    def _parse_style_word(
+        cls,
+        original_word: str,
+        words: Iterator[str],
+        attributes: Dict[str, Optional[Any]],
+        color: Optional[str],
+        bgcolor: Optional[str],
+        link: Optional[str],
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        word = original_word.lower()
+        if word == "on":
+            return cls._parse_style_on_word(words, color, link)
+        if word == "not":
+            return cls._parse_style_not_word(
+                words, attributes, color, bgcolor, link
+            )
+        if word == "link":
+            return cls._parse_style_link_word(words, color, bgcolor)
+        if word in cls.STYLE_ATTRIBUTES:
+            attributes[cls.STYLE_ATTRIBUTES[word]] = True
+            return color, bgcolor, link
+        return cls._parse_style_color_word(word, bgcolor)
+
+    @classmethod
     @lru_cache(maxsize=4096)
     def parse(cls, style_definition: str) -> "Style":
         """Parse a style definition.
@@ -510,7 +622,6 @@ class Style:
         if style_definition.strip() == "none" or not style_definition:
             return cls.null()
 
-        STYLE_ATTRIBUTES = cls.STYLE_ATTRIBUTES
         color: Optional[str] = None
         bgcolor: Optional[str] = None
         attributes: Dict[str, Optional[Any]] = {}
@@ -518,55 +629,15 @@ class Style:
 
         words = iter(style_definition.split())
         for original_word in words:
-            word = original_word.lower()
-            if word == "on":
-                word = next(words, "")
-                if not word:
-                    raise errors.StyleSyntaxError("color expected after 'on'")
-                try:
-                    Color.parse(word)
-                except ColorParseError as error:
-                    raise errors.StyleSyntaxError(
-                        f"unable to parse {word!r} as background color; {error}"
-                    ) from None
-                bgcolor = word
+            color, bgcolor, link = cls._parse_style_word(
+                original_word, words, attributes, color, bgcolor, link
+            )
+        return Style(color=color, bgcolor=bgcolor, link=link, **attributes)
 
-            elif word == "not":
-                word = next(words, "")
-                attribute = STYLE_ATTRIBUTES.get(word)
-                if attribute is None:
-                    raise errors.StyleSyntaxError(
-                        f"expected style attribute after 'not', found {word!r}"
-                    )
-                attributes[attribute] = False
-
-            elif word == "link":
-                word = next(words, "")
-                if not word:
-                    raise errors.StyleSyntaxError("URL expected after 'link'")
-                link = word
-
-            elif word in STYLE_ATTRIBUTES:
-                attributes[STYLE_ATTRIBUTES[word]] = True
-
-            else:
-                try:
-                    Color.parse(word)
-                except ColorParseError as error:
-                    raise errors.StyleSyntaxError(
-                        f"unable to parse {word!r} as color; {error}"
-                    ) from None
-                color = word
-        style = Style(color=color, bgcolor=bgcolor, link=link, **attributes)
-        return style
-
-    @lru_cache(maxsize=1024)
-    def get_html_style(self, theme: Optional[TerminalTheme] = None) -> str:
-        """Get a CSS style rule."""
-        theme = theme or DEFAULT_TERMINAL_THEME
-        css: List[str] = []
+    def _append_html_color_rules(
+        self, css: List[str], theme: TerminalTheme
+    ) -> None:
         append = css.append
-
         color = self.color
         bgcolor = self.bgcolor
         if self.reverse:
@@ -585,16 +656,23 @@ class Style:
         if bgcolor is not None:
             theme_color = bgcolor.get_truecolor(theme, foreground=False)
             append(f"background-color: {theme_color.hex}")
+
+    @lru_cache(maxsize=1024)
+    def get_html_style(self, theme: Optional[TerminalTheme] = None) -> str:
+        """Get a CSS style rule."""
+        theme = theme or DEFAULT_TERMINAL_THEME
+        css: List[str] = []
+        self._append_html_color_rules(css, theme)
         if self.bold:
-            append("font-weight: bold")
+            css.append("font-weight: bold")
         if self.italic:
-            append("font-style: italic")
+            css.append("font-style: italic")
         if self.underline:
-            append("text-decoration: underline")
+            css.append("text-decoration: underline")
         if self.strike:
-            append("text-decoration: line-through")
+            css.append("text-decoration: line-through")
         if self.overline:
-            append("text-decoration: overline")
+            css.append("text-decoration: overline")
         return "; ".join(css)
 
     @classmethod

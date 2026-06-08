@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import builtins
 import collections
 import dataclasses
@@ -27,25 +30,7 @@ from typing import (
     Union,
 )
 
-from rich.repr import RichReprResult
-
-try:
-    import attr as _attr_module
-
-    _has_attrs = hasattr(_attr_module, "ib")
-except ImportError:  # pragma: no cover
-    _has_attrs = False
-
-from . import get_console
-from ._loop import loop_last
-from ._pick import pick_bool
-from .abc import RichRenderable
-from .cells import cell_len
-from .highlighter import ReprHighlighter
-from .jupyter import JupyterMixin, JupyterRenderable
-from .measure import Measurement
-from .text import Text
-
+RichReprResult = import_attr('rich.repr', 'RichReprResult')
 if TYPE_CHECKING:
     from .console import (
         Console,
@@ -55,6 +40,26 @@ if TYPE_CHECKING:
         OverflowMethod,
         RenderResult,
     )
+
+
+try:
+    import attr as _attr_module
+
+    _has_attrs = hasattr(_attr_module, "ib")
+except ImportError:  # pragma: no cover
+    _has_attrs = False
+
+get_console = import_attr('rich._get_console', 'get_console')
+loop_last = import_attr('rich._loop', 'loop_last')
+pick_bool = import_attr('rich._pick', 'pick_bool')
+RichRenderable = import_attr('rich.renderable', 'RichRenderable')
+cell_len = import_attr('rich.cells', 'cell_len')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+JupyterRenderable = import_attr('rich.jupyter', 'JupyterRenderable')
+Measurement = import_attr('rich.measure', 'Measurement')
+Text = import_attr('rich.text', 'Text')
+
 
 
 def _is_attr_object(obj: Any) -> bool:
@@ -122,7 +127,7 @@ def _ipy_display_hook(
     expand_all: bool = False,
 ) -> Union[str, None]:
     # needed here to prevent circular import:
-    from .console import ConsoleRenderable
+    ConsoleRenderable = import_attr('rich.console', 'ConsoleRenderable')
 
     # always skip rich generated jupyter renderables or None values
     if _safe_isinstance(value, JupyterRenderable) or value is None:
@@ -192,7 +197,7 @@ def install(
         expand_all (bool, optional): Expand all containers. Defaults to False.
         max_frames (int): Maximum number of frames to show in a traceback, 0 for no maximum. Defaults to 100.
     """
-    from rich import get_console
+    get_console = import_attr('rich._get_console', 'get_console')
 
     console = console or get_console()
     assert console is not None
@@ -421,6 +426,23 @@ class Node:
     key_separator: str = ": "
     separator: str = ", "
 
+    def _iter_child_tokens(self) -> Iterable[str]:
+        """Generate tokens for child nodes."""
+        if not self.children:
+            yield self.empty
+            return
+        yield self.open_brace
+        if self.is_tuple and not self.is_namedtuple and len(self.children) == 1:
+            yield from self.children[0].iter_tokens()
+            yield ","
+            yield self.close_brace
+            return
+        for child in self.children:
+            yield from child.iter_tokens()
+            if not child.last:
+                yield self.separator
+        yield self.close_brace
+
     def iter_tokens(self) -> Iterable[str]:
         """Generate tokens for this node."""
         if self.key_repr:
@@ -428,20 +450,9 @@ class Node:
             yield self.key_separator
         if self.value_repr:
             yield self.value_repr
-        elif self.children is not None:
-            if self.children:
-                yield self.open_brace
-                if self.is_tuple and not self.is_namedtuple and len(self.children) == 1:
-                    yield from self.children[0].iter_tokens()
-                    yield ","
-                else:
-                    for child in self.children:
-                        yield from child.iter_tokens()
-                        if not child.last:
-                            yield self.separator
-                yield self.close_brace
-            else:
-                yield self.empty
+            return
+        if self.children is not None:
+            yield from self._iter_child_tokens()
 
     def check_length(self, start_length: int, max_length: int) -> bool:
         """Check the length fits within a limit.
@@ -577,6 +588,454 @@ def _is_namedtuple(obj: Any) -> bool:
     return isinstance(obj, tuple) and isinstance(fields, tuple)
 
 
+def _pretty_to_repr(obj: Any, max_string: Optional[int]) -> str:
+    """Get repr string for an object, but catch errors."""
+    if (
+        max_string is not None
+        and _safe_isinstance(obj, (bytes, str))
+        and len(obj) > max_string
+    ):
+        truncated = len(obj) - max_string
+        return f"{obj[:max_string]!r}+{truncated}"
+    try:
+        return repr(obj)
+    except Exception as error:
+        return f"<repr-error {str(error)!r}>"
+
+
+def _pretty_iter_rich_arg(arg: Any) -> Iterable[Union[Any, Tuple[str, Any]]]:
+    """Normalize a single rich repr argument."""
+    if not _safe_isinstance(arg, tuple):
+        yield arg
+        return
+    if len(arg) == 3:
+        key, child, default = arg
+        if default != child:
+            yield key, child
+        return
+    if len(arg) == 2:
+        yield arg[0], arg[1]
+        return
+    if len(arg) == 1:
+        yield arg[0]
+
+
+def _pretty_iter_rich_args(
+    rich_args: Any,
+) -> Iterable[Union[Any, Tuple[str, Any]]]:
+    """Normalize rich repr arguments."""
+    for arg in rich_args:
+        yield from _pretty_iter_rich_arg(arg)
+
+
+def _pretty_iter_attrs(
+    obj: Any, attr_fields: Any
+) -> Iterable[Tuple[str, Any, Optional[Callable[[Any], str]]]]:
+    """Iterate over attr fields and values."""
+    for attr in attr_fields:
+        if not attr.repr:
+            continue
+        try:
+            value = getattr(obj, attr.name)
+        except Exception as error:
+            yield (attr.name, error, None)
+        else:
+            yield (attr.name, value, attr.repr if callable(attr.repr) else None)
+
+
+def _pretty_has_fake_attributes(obj: Any) -> bool:
+    """Detect objects that break attribute introspection."""
+    try:
+        return hasattr(obj, "awehoi234_wdfjwljet234_234wdfoijsdfmmnxpi492")
+    except Exception:
+        return False
+
+
+def _pretty_get_rich_repr(obj: Any) -> Optional[RichReprResult]:
+    """Return rich repr result when available."""
+    try:
+        if hasattr(obj, "__rich_repr__") and not isclass(obj):
+            return obj.__rich_repr__()
+    except Exception:
+        pass
+    return None
+
+
+def _pretty_append_mapping_items(
+    obj: Any,
+    children: List[Node],
+    depth: int,
+    max_length: Optional[int],
+    max_string: Optional[int],
+    traverse: Callable[[Any, bool, int], Node],
+) -> int:
+    """Append mapping container children and return total item count."""
+    append = children.append
+    num_items = len(obj)
+    last_item_index = num_items - 1
+    iter_items = iter(obj.items())
+    if max_length is not None:
+        iter_items = islice(iter_items, max_length)
+    for index, (key, child) in enumerate(iter_items):
+        child_node = traverse(child, False, depth + 1)
+        child_node.key_repr = _pretty_to_repr(key, max_string)
+        child_node.last = index == last_item_index
+        append(child_node)
+    return num_items
+
+
+def _pretty_append_sequence_items(
+    obj: Any,
+    children: List[Node],
+    depth: int,
+    max_length: Optional[int],
+    traverse: Callable[[Any, bool, int], Node],
+) -> int:
+    """Append sequence container children and return total item count."""
+    append = children.append
+    num_items = len(obj)
+    last_item_index = num_items - 1
+    iter_values = iter(obj)
+    if max_length is not None:
+        iter_values = islice(iter_values, max_length)
+    for index, child in enumerate(iter_values):
+        child_node = traverse(child, False, depth + 1)
+        child_node.last = index == last_item_index
+        append(child_node)
+    return num_items
+
+
+def _pretty_traverse_container(
+    obj: Any,
+    obj_type: type,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    max_length: Optional[int],
+    max_string: Optional[int],
+    traverse: Callable[[Any, bool, int], Node],
+) -> Node:
+    """Build a node for list/dict/set-like containers."""
+    open_brace, close_brace, empty = _BRACES[obj_type](obj)
+    if reached_max_depth:
+        return Node(value_repr=f"{open_brace}...{close_brace}")
+    if obj_type.__repr__ != type(obj).__repr__:
+        return Node(value_repr=_pretty_to_repr(obj, max_string), last=root)
+    if not obj:
+        return Node(empty=empty, children=[], last=root)
+
+    children: List[Node] = []
+    node = Node(
+        open_brace=open_brace,
+        close_brace=close_brace,
+        children=children,
+        last=root,
+    )
+    if _safe_isinstance(obj, _MAPPING_CONTAINERS):
+        num_items = _pretty_append_mapping_items(
+            obj, children, depth, max_length, max_string, traverse
+        )
+    else:
+        num_items = _pretty_append_sequence_items(
+            obj, children, depth, max_length, traverse
+        )
+    if max_length is not None and num_items > max_length:
+        children.append(Node(value_repr=f"... +{num_items - max_length}", last=True))
+    return node
+
+
+def _append_rich_repr_child_nodes(
+    args: list,
+    children: List[Node],
+    traverse: Callable[[Any, bool, int], Node],
+    depth: int,
+) -> None:
+    append = children.append
+    for last, arg in loop_last(args):
+        if _safe_isinstance(arg, tuple):
+            key, child = arg
+            child_node = traverse(child, False, depth + 1)
+            child_node.last = last
+            child_node.key_repr = key
+            child_node.key_separator = "="
+            append(child_node)
+        else:
+            child_node = traverse(arg, False, depth + 1)
+            child_node.last = last
+            append(child_node)
+
+
+def _pretty_traverse_rich_repr(
+    obj: Any,
+    rich_repr_result: RichReprResult,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    traverse: Callable[[Any, bool, int], Node],
+) -> Node:
+    """Build a node from an object's __rich_repr__ result."""
+    angular = getattr(obj.__rich_repr__, "angular", False)
+    args = list(_pretty_iter_rich_args(rich_repr_result))
+    class_name = obj.__class__.__name__
+    if not args:
+        value_repr = f"<{class_name}>" if angular else f"{class_name}()"
+        return Node(value_repr=value_repr, children=[], last=root)
+    if reached_max_depth:
+        value_repr = f"<{class_name}...>" if angular else f"{class_name}(...)"
+        return Node(value_repr=value_repr)
+
+    children: List[Node] = []
+    if angular:
+        node = Node(
+            open_brace=f"<{class_name} ",
+            close_brace=">",
+            children=children,
+            last=root,
+            separator=" ",
+        )
+    else:
+        node = Node(
+            open_brace=f"{class_name}(",
+            close_brace=")",
+            children=children,
+            last=root,
+        )
+    _append_rich_repr_child_nodes(args, children, traverse, depth)
+    return node
+
+
+def _pretty_traverse_attrs(
+    obj: Any,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    traverse: Callable[[Any, bool, int], Node],
+) -> Node:
+    """Build a node from an attrs object."""
+    attr_fields = _get_attr_fields(obj)
+    class_name = obj.__class__.__name__
+    if not attr_fields:
+        return Node(value_repr=f"{class_name}()", children=[], last=root)
+    if reached_max_depth:
+        return Node(value_repr=f"{class_name}(...)")
+
+    children: List[Node] = []
+    append = children.append
+    node = Node(
+        open_brace=f"{class_name}(",
+        close_brace=")",
+        children=children,
+        last=root,
+    )
+    for last, (name, value, repr_callable) in loop_last(
+        _pretty_iter_attrs(obj, attr_fields)
+    ):
+        if repr_callable:
+            child_node = Node(value_repr=str(repr_callable(value)))
+        else:
+            child_node = traverse(value, False, depth + 1)
+        child_node.last = last
+        child_node.key_repr = name
+        child_node.key_separator = "="
+        append(child_node)
+    return node
+
+
+def _pretty_traverse_dataclass(
+    obj: Any,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    traverse: Callable[[Any, bool, int], Node],
+) -> Node:
+    """Build a node from a dataclass instance."""
+    class_name = obj.__class__.__name__
+    if reached_max_depth:
+        return Node(value_repr=f"{class_name}(...)")
+    children: List[Node] = []
+    append = children.append
+    node = Node(
+        open_brace=f"{class_name}(",
+        close_brace=")",
+        children=children,
+        last=root,
+        empty=f"{class_name}()",
+    )
+    for last, field in loop_last(
+        field for field in fields(obj) if field.repr and hasattr(obj, field.name)
+    ):
+        child_node = traverse(getattr(obj, field.name), False, depth + 1)
+        child_node.key_repr = field.name
+        child_node.last = last
+        child_node.key_separator = "="
+        append(child_node)
+    return node
+
+
+def _pretty_traverse_namedtuple(
+    obj: Any,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    traverse: Callable[[Any, bool, int], Node],
+) -> Node:
+    """Build a node from a namedtuple instance."""
+    class_name = obj.__class__.__name__
+    if reached_max_depth:
+        return Node(value_repr=f"{class_name}(...)")
+    children: List[Node] = []
+    append = children.append
+    node = Node(
+        open_brace=f"{class_name}(",
+        close_brace=")",
+        children=children,
+        empty=f"{class_name}()",
+    )
+    for last, (key, value) in loop_last(obj._asdict().items()):
+        child_node = traverse(value, False, depth + 1)
+        child_node.key_repr = key
+        child_node.last = last
+        child_node.key_separator = "="
+        append(child_node)
+    return node
+
+
+def _traverse_object_rich_or_attrs(
+    obj: Any,
+    *,
+    root: bool,
+    depth: int,
+    reached_max_depth: bool,
+    fake_attributes: bool,
+    visited_ids: Set[int],
+    push_visited: Callable[[int], None],
+    pop_visited: Callable[[int], None],
+    max_length: Optional[int],
+    max_string: Optional[int],
+    max_depth: Optional[int],
+) -> Optional[Node]:
+    def child_traverse(o: Any, r: bool = False, d: int = 0) -> Node:
+        return _traverse_object(
+            o,
+            root=r,
+            depth=d,
+            visited_ids=visited_ids,
+            push_visited=push_visited,
+            pop_visited=pop_visited,
+            max_length=max_length,
+            max_string=max_string,
+            max_depth=max_depth,
+        )
+
+    rich_repr_result = None if fake_attributes else _pretty_get_rich_repr(obj)
+    if rich_repr_result is not None:
+        push_visited(id(obj))
+        node = _pretty_traverse_rich_repr(
+            obj, rich_repr_result, root, depth, reached_max_depth, child_traverse
+        )
+        pop_visited(id(obj))
+        return node
+    if _is_attr_object(obj) and not fake_attributes:
+        push_visited(id(obj))
+        node = _pretty_traverse_attrs(
+            obj, root, depth, reached_max_depth, child_traverse
+        )
+        pop_visited(id(obj))
+        return node
+    return None
+
+
+def _traverse_object(
+    obj: Any,
+    *,
+    root: bool,
+    depth: int,
+    visited_ids: Set[int],
+    push_visited: Callable[[int], None],
+    pop_visited: Callable[[int], None],
+    max_length: Optional[int],
+    max_string: Optional[int],
+    max_depth: Optional[int],
+) -> Node:
+    """Walk the object depth first."""
+    obj_id = id(obj)
+    if obj_id in visited_ids:
+        return Node(value_repr="...")
+
+    reached_max_depth = max_depth is not None and depth >= max_depth
+    fake_attributes = _pretty_has_fake_attributes(obj)
+    rich_or_attr_node = _traverse_object_rich_or_attrs(
+        obj,
+        root=root,
+        depth=depth,
+        reached_max_depth=reached_max_depth,
+        fake_attributes=fake_attributes,
+        visited_ids=visited_ids,
+        push_visited=push_visited,
+        pop_visited=pop_visited,
+        max_length=max_length,
+        max_string=max_string,
+        max_depth=max_depth,
+    )
+    if rich_or_attr_node is not None:
+        return rich_or_attr_node
+
+    def child_traverse(o: Any, r: bool = False, d: int = 0) -> Node:
+        return _traverse_object(
+            o,
+            root=r,
+            depth=d,
+            visited_ids=visited_ids,
+            push_visited=push_visited,
+            pop_visited=pop_visited,
+            max_length=max_length,
+            max_string=max_string,
+            max_depth=max_depth,
+        )
+
+    if (
+        is_dataclass(obj)
+        and not _safe_isinstance(obj, type)
+        and not fake_attributes
+        and _is_dataclass_repr(obj)
+    ):
+        push_visited(obj_id)
+        node = _pretty_traverse_dataclass(
+            obj, root, depth, reached_max_depth, child_traverse
+        )
+        pop_visited(obj_id)
+    elif _is_namedtuple(obj) and _has_default_namedtuple_repr(obj):
+        push_visited(obj_id)
+        node = _pretty_traverse_namedtuple(
+            obj, root, depth, reached_max_depth, child_traverse
+        )
+        pop_visited(obj_id)
+    elif _safe_isinstance(obj, _CONTAINERS):
+        obj_type = next(
+            container_type
+            for container_type in _CONTAINERS
+            if _safe_isinstance(obj, container_type)
+        )
+        push_visited(obj_id)
+        node = _pretty_traverse_container(
+            obj,
+            obj_type,
+            root,
+            depth,
+            reached_max_depth,
+            max_length,
+            max_string,
+            child_traverse,
+        )
+        pop_visited(obj_id)
+    else:
+        node = Node(value_repr=_pretty_to_repr(obj, max_string), last=root)
+
+    node.is_tuple = type(obj) is tuple
+    node.is_namedtuple = _is_namedtuple(obj)
+    return node
+
+
 def traverse(
     _object: Any,
     max_length: Optional[int] = None,
@@ -598,280 +1057,21 @@ def traverse(
         Node: The root of a tree structure which can be used to render a pretty repr.
     """
 
-    def to_repr(obj: Any) -> str:
-        """Get repr string for an object, but catch errors."""
-        if (
-            max_string is not None
-            and _safe_isinstance(obj, (bytes, str))
-            and len(obj) > max_string
-        ):
-            truncated = len(obj) - max_string
-            obj_repr = f"{obj[:max_string]!r}+{truncated}"
-        else:
-            try:
-                obj_repr = repr(obj)
-            except Exception as error:
-                obj_repr = f"<repr-error {str(error)!r}>"
-        return obj_repr
-
     visited_ids: Set[int] = set()
     push_visited = visited_ids.add
     pop_visited = visited_ids.remove
 
-    def _traverse(obj: Any, root: bool = False, depth: int = 0) -> Node:
-        """Walk the object depth first."""
-
-        obj_id = id(obj)
-        if obj_id in visited_ids:
-            # Recursion detected
-            return Node(value_repr="...")
-
-        obj_type = type(obj)
-        children: List[Node]
-        reached_max_depth = max_depth is not None and depth >= max_depth
-
-        def iter_rich_args(rich_args: Any) -> Iterable[Union[Any, Tuple[str, Any]]]:
-            for arg in rich_args:
-                if _safe_isinstance(arg, tuple):
-                    if len(arg) == 3:
-                        key, child, default = arg
-                        if default == child:
-                            continue
-                        yield key, child
-                    elif len(arg) == 2:
-                        key, child = arg
-                        yield key, child
-                    elif len(arg) == 1:
-                        yield arg[0]
-                else:
-                    yield arg
-
-        try:
-            fake_attributes = hasattr(
-                obj, "awehoi234_wdfjwljet234_234wdfoijsdfmmnxpi492"
-            )
-        except Exception:
-            fake_attributes = False
-
-        rich_repr_result: Optional[RichReprResult] = None
-        if not fake_attributes:
-            try:
-                if hasattr(obj, "__rich_repr__") and not isclass(obj):
-                    rich_repr_result = obj.__rich_repr__()
-            except Exception:
-                pass
-
-        if rich_repr_result is not None:
-            push_visited(obj_id)
-            angular = getattr(obj.__rich_repr__, "angular", False)
-            args = list(iter_rich_args(rich_repr_result))
-            class_name = obj.__class__.__name__
-
-            if args:
-                children = []
-                append = children.append
-
-                if reached_max_depth:
-                    if angular:
-                        node = Node(value_repr=f"<{class_name}...>")
-                    else:
-                        node = Node(value_repr=f"{class_name}(...)")
-                else:
-                    if angular:
-                        node = Node(
-                            open_brace=f"<{class_name} ",
-                            close_brace=">",
-                            children=children,
-                            last=root,
-                            separator=" ",
-                        )
-                    else:
-                        node = Node(
-                            open_brace=f"{class_name}(",
-                            close_brace=")",
-                            children=children,
-                            last=root,
-                        )
-                    for last, arg in loop_last(args):
-                        if _safe_isinstance(arg, tuple):
-                            key, child = arg
-                            child_node = _traverse(child, depth=depth + 1)
-                            child_node.last = last
-                            child_node.key_repr = key
-                            child_node.key_separator = "="
-                            append(child_node)
-                        else:
-                            child_node = _traverse(arg, depth=depth + 1)
-                            child_node.last = last
-                            append(child_node)
-            else:
-                node = Node(
-                    value_repr=f"<{class_name}>" if angular else f"{class_name}()",
-                    children=[],
-                    last=root,
-                )
-            pop_visited(obj_id)
-        elif _is_attr_object(obj) and not fake_attributes:
-            push_visited(obj_id)
-            children = []
-            append = children.append
-
-            attr_fields = _get_attr_fields(obj)
-            if attr_fields:
-                if reached_max_depth:
-                    node = Node(value_repr=f"{obj.__class__.__name__}(...)")
-                else:
-                    node = Node(
-                        open_brace=f"{obj.__class__.__name__}(",
-                        close_brace=")",
-                        children=children,
-                        last=root,
-                    )
-
-                    def iter_attrs() -> (
-                        Iterable[Tuple[str, Any, Optional[Callable[[Any], str]]]]
-                    ):
-                        """Iterate over attr fields and values."""
-                        for attr in attr_fields:
-                            if attr.repr:
-                                try:
-                                    value = getattr(obj, attr.name)
-                                except Exception as error:
-                                    # Can happen, albeit rarely
-                                    yield (attr.name, error, None)
-                                else:
-                                    yield (
-                                        attr.name,
-                                        value,
-                                        attr.repr if callable(attr.repr) else None,
-                                    )
-
-                    for last, (name, value, repr_callable) in loop_last(iter_attrs()):
-                        if repr_callable:
-                            child_node = Node(value_repr=str(repr_callable(value)))
-                        else:
-                            child_node = _traverse(value, depth=depth + 1)
-                        child_node.last = last
-                        child_node.key_repr = name
-                        child_node.key_separator = "="
-                        append(child_node)
-            else:
-                node = Node(
-                    value_repr=f"{obj.__class__.__name__}()", children=[], last=root
-                )
-            pop_visited(obj_id)
-        elif (
-            is_dataclass(obj)
-            and not _safe_isinstance(obj, type)
-            and not fake_attributes
-            and _is_dataclass_repr(obj)
-        ):
-            push_visited(obj_id)
-            children = []
-            append = children.append
-            if reached_max_depth:
-                node = Node(value_repr=f"{obj.__class__.__name__}(...)")
-            else:
-                node = Node(
-                    open_brace=f"{obj.__class__.__name__}(",
-                    close_brace=")",
-                    children=children,
-                    last=root,
-                    empty=f"{obj.__class__.__name__}()",
-                )
-
-                for last, field in loop_last(
-                    field
-                    for field in fields(obj)
-                    if field.repr and hasattr(obj, field.name)
-                ):
-                    child_node = _traverse(getattr(obj, field.name), depth=depth + 1)
-                    child_node.key_repr = field.name
-                    child_node.last = last
-                    child_node.key_separator = "="
-                    append(child_node)
-
-            pop_visited(obj_id)
-        elif _is_namedtuple(obj) and _has_default_namedtuple_repr(obj):
-            push_visited(obj_id)
-            class_name = obj.__class__.__name__
-            if reached_max_depth:
-                # If we've reached the max depth, we still show the class name, but not its contents
-                node = Node(
-                    value_repr=f"{class_name}(...)",
-                )
-            else:
-                children = []
-                append = children.append
-                node = Node(
-                    open_brace=f"{class_name}(",
-                    close_brace=")",
-                    children=children,
-                    empty=f"{class_name}()",
-                )
-                for last, (key, value) in loop_last(obj._asdict().items()):
-                    child_node = _traverse(value, depth=depth + 1)
-                    child_node.key_repr = key
-                    child_node.last = last
-                    child_node.key_separator = "="
-                    append(child_node)
-            pop_visited(obj_id)
-        elif _safe_isinstance(obj, _CONTAINERS):
-            for container_type in _CONTAINERS:
-                if _safe_isinstance(obj, container_type):
-                    obj_type = container_type
-                    break
-
-            push_visited(obj_id)
-
-            open_brace, close_brace, empty = _BRACES[obj_type](obj)
-
-            if reached_max_depth:
-                node = Node(value_repr=f"{open_brace}...{close_brace}")
-            elif obj_type.__repr__ != type(obj).__repr__:
-                node = Node(value_repr=to_repr(obj), last=root)
-            elif obj:
-                children = []
-                node = Node(
-                    open_brace=open_brace,
-                    close_brace=close_brace,
-                    children=children,
-                    last=root,
-                )
-                append = children.append
-                num_items = len(obj)
-                last_item_index = num_items - 1
-
-                if _safe_isinstance(obj, _MAPPING_CONTAINERS):
-                    iter_items = iter(obj.items())
-                    if max_length is not None:
-                        iter_items = islice(iter_items, max_length)
-                    for index, (key, child) in enumerate(iter_items):
-                        child_node = _traverse(child, depth=depth + 1)
-                        child_node.key_repr = to_repr(key)
-                        child_node.last = index == last_item_index
-                        append(child_node)
-                else:
-                    iter_values = iter(obj)
-                    if max_length is not None:
-                        iter_values = islice(iter_values, max_length)
-                    for index, child in enumerate(iter_values):
-                        child_node = _traverse(child, depth=depth + 1)
-                        child_node.last = index == last_item_index
-                        append(child_node)
-                if max_length is not None and num_items > max_length:
-                    append(Node(value_repr=f"... +{num_items - max_length}", last=True))
-            else:
-                node = Node(empty=empty, children=[], last=root)
-
-            pop_visited(obj_id)
-        else:
-            node = Node(value_repr=to_repr(obj), last=root)
-        node.is_tuple = type(obj) == tuple
-        node.is_namedtuple = _is_namedtuple(obj)
-        return node
-
-    node = _traverse(_object, root=True)
+    node = _traverse_object(
+        _object,
+        root=True,
+        depth=0,
+        visited_ids=visited_ids,
+        push_visited=push_visited,
+        pop_visited=pop_visited,
+        max_length=max_length,
+        max_string=max_string,
+        max_depth=max_depth,
+    )
     return node
 
 
@@ -1005,7 +1205,7 @@ if __name__ == "__main__":  # pragma: no cover
     }
     data["foo"].append(data)  # type: ignore[attr-defined]
 
-    from rich import print
+    print = import_attr('rich', 'print')
 
     print(Pretty(data, indent_guides=True, max_string=20))
 

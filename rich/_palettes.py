@@ -1,4 +1,7 @@
-from .palette import Palette
+from __future__ import annotations
+
+from ._lazy import import_attr
+Palette = import_attr('rich.palette', 'Palette')
 
 
 # Taken from https://en.wikipedia.org/wiki/ANSI_escape_code (Windows 10 column)

@@ -1,8 +1,12 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import Any, Generic, List, Optional, TextIO, TypeVar, Union, overload
 
-from . import get_console
-from .console import Console
-from .text import Text, TextType
+get_console = import_attr('rich._get_console', 'get_console')
+Console = import_attr('rich.console', 'Console')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 
 PromptType = TypeVar("PromptType")
 DefaultType = TypeVar("DefaultType")
@@ -364,7 +368,7 @@ class Confirm(PromptBase[bool]):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
+    print = import_attr('rich', 'print')
 
     if Confirm.ask("Run [i]prompt[/i] tests?", default=True):
         while True:

@@ -51,8 +51,6 @@ time.sleep(1)
 
 
 def test_locals():
-    foo = (1, 2, 3)
-    movies = ["Deadpool", "Rise of the Skywalker"]
     console = Console()
 
     console.log(

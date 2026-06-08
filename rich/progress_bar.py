@@ -1,15 +1,22 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import math
 from functools import lru_cache
 from time import monotonic
 from typing import Iterable, List, Optional
 
-from .color import Color, blend_rgb
-from .color_triplet import ColorTriplet
-from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
-from .style import Style, StyleType
+Color = import_attr('rich.color', 'Color')
+blend_rgb = import_attr('rich.color', 'blend_rgb')
+ColorTriplet = import_attr('rich.color_triplet', 'ColorTriplet')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderResult = import_attr('rich.console', 'RenderResult')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+StyleType = import_attr('rich.style', 'StyleType')
 
 # Number of characters before 'pulse' animation repeats
 PULSE_SIZE = 20
@@ -153,20 +160,17 @@ class ProgressBar(JupyterMixin):
         segments = segments[offset : offset + width]
         yield from segments
 
-    def __rich_console__(
-        self, console: Console, options: ConsoleOptions
+    def _render_complete_bar(
+        self,
+        console: Console,
+        width: int,
+        *,
+        ascii: bool,
     ) -> RenderResult:
-        width = min(self.width or options.max_width, options.max_width)
-        ascii = options.legacy_windows or options.ascii_only
-        should_pulse = self.pulse or self.total is None
-        if should_pulse:
-            yield from self._render_pulse(console, width, ascii=ascii)
-            return
-
+        """Render a determinate progress bar."""
         completed: Optional[float] = (
             min(self.total, max(0, self.completed)) if self.total is not None else None
         )
-
         bar = "-" if ascii else "━"
         half_bar_right = " " if ascii else "╸"
         half_bar_left = " " if ascii else "╺"
@@ -187,15 +191,41 @@ class ProgressBar(JupyterMixin):
             yield _Segment(bar * bar_count, complete_style)
         if half_bar_count:
             yield _Segment(half_bar_right * half_bar_count, complete_style)
+        yield from self._yield_incomplete_bar(
+            console, width, bar_count, half_bar_count, bar, half_bar_left, style
+        )
 
-        if not console.no_color:
-            remaining_bars = width - bar_count - half_bar_count
-            if remaining_bars and console.color_system is not None:
-                if not half_bar_count and bar_count:
-                    yield _Segment(half_bar_left, style)
-                    remaining_bars -= 1
-                if remaining_bars:
-                    yield _Segment(bar * remaining_bars, style)
+    def _yield_incomplete_bar(
+        self,
+        console: Console,
+        width: int,
+        bar_count: int,
+        half_bar_count: int,
+        bar: str,
+        half_bar_left: str,
+        style: Style,
+    ) -> RenderResult:
+        if console.no_color:
+            return
+        remaining_bars = width - bar_count - half_bar_count
+        if not remaining_bars or console.color_system is None:
+            return
+        if not half_bar_count and bar_count:
+            yield Segment(half_bar_left, style)
+            remaining_bars -= 1
+        if remaining_bars:
+            yield Segment(bar * remaining_bars, style)
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        width = min(self.width or options.max_width, options.max_width)
+        ascii = options.legacy_windows or options.ascii_only
+        should_pulse = self.pulse or self.total is None
+        if should_pulse:
+            yield from self._render_pulse(console, width, ascii=ascii)
+            return
+        yield from self._render_complete_bar(console, width, ascii=ascii)
 
     def __rich_measure__(
         self, console: Console, options: ConsoleOptions

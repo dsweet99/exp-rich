@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import re
 from abc import ABC, abstractmethod
 from typing import ClassVar, Sequence, Union
 
-from .text import Span, Text
+from ._lazy import import_attr
+
+Text = import_attr("rich.text", "Text")
+Span = import_attr("rich.text", "Span")
 
 
 def _combine_regex(*regexes: str) -> str:
@@ -103,6 +108,19 @@ class ReprHighlighter(RegexHighlighter):
     ]
 
 
+def _mark_json_key(text: Text, start: int, end: int, plain: str, whitespace: set[str]) -> None:
+    append = text.spans.append
+    cursor = end
+    while cursor < len(plain):
+        char = plain[cursor]
+        cursor += 1
+        if char == ":":
+            append(Span(start, end, "json.key"))
+            return
+        if char not in whitespace:
+            return
+
+
 class JSONHighlighter(RegexHighlighter):
     """Highlights JSON"""
 
@@ -123,21 +141,10 @@ class JSONHighlighter(RegexHighlighter):
     def highlight(self, text: Text) -> None:
         super().highlight(text)
 
-        # Additional work to handle highlighting JSON keys
         plain = text.plain
-        append = text.spans.append
-        whitespace = self.JSON_WHITESPACE
         for match in re.finditer(self.JSON_STR, plain):
             start, end = match.span()
-            cursor = end
-            while cursor < len(plain):
-                char = plain[cursor]
-                cursor += 1
-                if char == ":":
-                    append(Span(start, end, "json.key"))
-                elif char in whitespace:
-                    continue
-                break
+            _mark_json_key(text, start, end, plain, self.JSON_WHITESPACE)
 
 
 class ISO8601Highlighter(RegexHighlighter):
@@ -198,35 +205,3 @@ class ISO8601Highlighter(RegexHighlighter):
     ]
 
 
-if __name__ == "__main__":  # pragma: no cover
-    from .console import Console
-
-    console = Console()
-    console.print("[bold green]hello world![/bold green]")
-    console.print("'[bold green]hello world![/bold green]'")
-
-    console.print(" /foo")
-    console.print("/foo/")
-    console.print("/foo/bar")
-    console.print("foo/bar/baz")
-
-    console.print("/foo/bar/baz?foo=bar+egg&egg=baz")
-    console.print("/foo/bar/baz/")
-    console.print("/foo/bar/baz/egg")
-    console.print("/foo/bar/baz/egg.py")
-    console.print("/foo/bar/baz/egg.py word")
-    console.print(" /foo/bar/baz/egg.py word")
-    console.print("foo /foo/bar/baz/egg.py word")
-    console.print("foo /foo/bar/ba._++z/egg+.py word")
-    console.print("https://example.org?foo=bar#header")
-
-    console.print(1234567.34)
-    console.print(1 / 2)
-    console.print(-1 / 123123123123)
-
-    console.print(
-        "127.0.1.1 bar 192.168.1.4 2001:0db8:85a3:0000:0000:8a2e:0370:7334 foo"
-    )
-    import json
-
-    console.print_json(json.dumps(obj={"name": "apple", "count": 1}), indent=None)

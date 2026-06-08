@@ -1,3 +1,4 @@
+from ._lazy import import_attr
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -26,8 +27,8 @@ class SystemPager(Pager):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from .__main__ import make_test_card
-    from .console import Console
+    make_test_card = import_attr('rich.__main__', 'make_test_card')
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
     with console.pager(styles=True):

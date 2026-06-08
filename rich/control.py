@@ -1,10 +1,16 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import time
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Union, Final
 
-from .segment import ControlCode, ControlType, Segment
-
+ControlCode = import_attr('rich.segment', 'ControlCode')
+ControlType = import_attr('rich.segment', 'ControlType')
+Segment = import_attr('rich.segment', 'Segment')
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderResult
+
+
 
 STRIP_CONTROL_CODES: Final = [
     7,  # Bell
@@ -209,7 +215,7 @@ def escape_control_codes(
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
     console.print("Look at the title of your terminal window ^")

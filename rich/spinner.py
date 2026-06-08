@@ -1,13 +1,17 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import TYPE_CHECKING, List, Optional, Union, cast
 
-from ._spinners import SPINNERS
-from .measure import Measurement
-from .table import Table
-from .text import Text
-
+SPINNERS = import_attr('rich._spinners', 'SPINNERS')
+Measurement = import_attr('rich.measure', 'Measurement')
+Table = import_attr('rich.table', 'Table')
+Text = import_attr('rich.text', 'Text')
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderableType, RenderResult
     from .style import StyleType
+
+
 
 
 class Spinner:
@@ -117,8 +121,8 @@ class Spinner:
 if __name__ == "__main__":  # pragma: no cover
     from time import sleep
 
-    from .console import Group
-    from .live import Live
+    Group = import_attr('rich.console', 'Group')
+    Live = import_attr('rich.live', 'Live')
 
     all_spinners = Group(
         *[

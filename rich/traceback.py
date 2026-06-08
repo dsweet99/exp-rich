@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import inspect
 import linecache
 import os
@@ -6,6 +9,7 @@ from dataclasses import dataclass, field
 from itertools import islice
 from traceback import walk_tb
 from types import ModuleType, TracebackType
+from importlib import import_module
 from typing import (
     Any,
     Callable,
@@ -13,7 +17,6 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Type,
@@ -26,31 +29,46 @@ from pygments.token import Text as TextToken
 from pygments.token import Token
 from pygments.util import ClassNotFound
 
-from . import pretty
-from ._loop import loop_first_last, loop_last
-from .columns import Columns
-from .console import (
-    Console,
-    ConsoleOptions,
-    ConsoleRenderable,
-    OverflowMethod,
-    Group,
-    RenderResult,
-    group,
-)
-from .constrain import Constrain
-from .highlighter import RegexHighlighter, ReprHighlighter
-from .panel import Panel
-from .scope import render_scope
-from .style import Style
-from .syntax import Syntax, SyntaxPosition
-from .text import Text
-from .theme import Theme
+loop_first_last = import_attr('rich._loop', 'loop_first_last')
+loop_last = import_attr('rich._loop', 'loop_last')
+Columns = import_attr('rich.columns', 'Columns')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+ConsoleRenderable = import_attr('rich.console', 'ConsoleRenderable')
+OverflowMethod = import_attr('rich.console', 'OverflowMethod')
+Group = import_attr('rich.console', 'Group')
+RenderResult = import_attr('rich.console', 'RenderResult')
+group = import_attr('rich.console', 'group')
+Constrain = import_attr('rich.constrain', 'Constrain')
+RegexHighlighter = import_attr('rich.highlighter', 'RegexHighlighter')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+Panel = import_attr('rich.panel', 'Panel')
+render_scope = import_attr('rich.scope', 'render_scope')
+Style = import_attr('rich.style', 'Style')
+Syntax = import_attr('rich.syntax', 'Syntax')
+SyntaxPosition = import_attr('rich.syntax', 'SyntaxPosition')
+Text = import_attr('rich.text', 'Text')
+Theme = import_attr('rich.theme', 'Theme')
 
 WINDOWS = sys.platform == "win32"
 
 LOCALS_MAX_LENGTH = 10
 LOCALS_MAX_STRING = 80
+
+
+def _iter_syntax_lines_single(line: int, column1: int, column2: int) -> Iterable[Tuple[int, int, int]]:
+    yield line, column1, column2
+
+
+def _iter_syntax_lines_range(
+    line1: int, line2: int, column1: int, column2: int
+) -> Iterable[Tuple[int, int, int]]:
+    yield line1, column1, -1
+    for _first, last, line_no in loop_first_last(range(line1 + 1, line2)):
+        if last:
+            yield line_no, 0, column2
+        else:
+            yield line_no, 0, -1
 
 
 def _iter_syntax_lines(
@@ -70,15 +88,9 @@ def _iter_syntax_lines(
     line2, column2 = end
 
     if line1 == line2:
-        yield line1, column1, column2
+        yield from _iter_syntax_lines_single(line1, column1, column2)
     else:
-        for first, last, line_no in loop_first_last(range(line1, line2 + 1)):
-            if first:
-                yield line_no, column1, -1
-            elif last:
-                yield line_no, 0, column2
-            else:
-                yield line_no, 0, -1
+        yield from _iter_syntax_lines_range(line1, line2, column1, column2)
 
 
 def install(
@@ -208,7 +220,9 @@ def install(
 
     try:  # pragma: no cover
         # if within ipython, use customized traceback
-        ip = get_ipython()  # type: ignore[name-defined]
+        from IPython import get_ipython
+
+        ip = get_ipython()
         ipy_excepthook_closure(ip)
         return sys.excepthook
     except Exception:
@@ -224,7 +238,7 @@ class Frame:
     lineno: int
     name: str
     line: str = ""
-    locals: Optional[Dict[str, pretty.Node]] = None
+    locals: Optional[Dict[str, Any]] = None
     last_instruction: Optional[Tuple[Tuple[int, int], Tuple[int, int]]] = None
 
 
@@ -253,6 +267,318 @@ class Stack:
 @dataclass
 class Trace:
     stacks: List[Stack]
+
+
+def _traceback_safe_str(_object: Any) -> str:
+    """Don't allow exceptions from __str__ to propagate."""
+    try:
+        return str(_object)
+    except Exception:
+        return "<exception str() failed>"
+
+
+def _traceback_filter_locals(
+    iter_locals: Iterable[Tuple[str, object]],
+    *,
+    locals_hide_dunder: bool,
+    locals_hide_sunder: bool,
+) -> Iterable[Tuple[str, object]]:
+    if not (locals_hide_dunder or locals_hide_sunder):
+        yield from iter_locals
+        return
+    for key, value in iter_locals:
+        if locals_hide_dunder and key.startswith("__"):
+            continue
+        if locals_hide_sunder and key.startswith("_"):
+            continue
+        yield key, value
+
+
+def _traceback_frame_last_instruction(
+    frame_summary: Any,
+) -> Optional[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    if sys.version_info < (3, 11):
+        return None
+    instruction_index = frame_summary.f_lasti // 2
+    instruction_position = next(
+        islice(
+            frame_summary.f_code.co_positions(),
+            instruction_index,
+            instruction_index + 1,
+        )
+    )
+    start_line, end_line, start_column, end_column = instruction_position
+    if (
+        start_line is not None
+        and end_line is not None
+        and start_column is not None
+        and end_column is not None
+    ):
+        return (start_line, start_column), (end_line, end_column)
+    return None
+
+
+def _traceback_resolve_filename(filename: str, import_cwd: str) -> str:
+    if filename and not filename.startswith("<"):
+        if not os.path.isabs(filename):
+            filename = os.path.join(import_cwd, filename)
+    return filename or "?"
+
+
+def _traceback_build_frame(
+    frame_summary: Any,
+    line_no: int,
+    *,
+    import_cwd: str,
+    show_locals: bool,
+    locals_max_length: int,
+    locals_max_string: int,
+    locals_max_depth: Optional[int],
+    locals_hide_dunder: bool,
+    locals_hide_sunder: bool,
+) -> Frame:
+    filename = _traceback_resolve_filename(
+        frame_summary.f_code.co_filename, import_cwd
+    )
+    locals: Optional[Dict[str, Any]] = None
+    if show_locals:
+        locals = {
+            key: import_module("rich.pretty").traverse(
+                value,
+                max_length=locals_max_length,
+                max_string=locals_max_string,
+                max_depth=locals_max_depth,
+            )
+            for key, value in _traceback_filter_locals(
+                frame_summary.f_locals.items(),
+                locals_hide_dunder=locals_hide_dunder,
+                locals_hide_sunder=locals_hide_sunder,
+            )
+            if not (inspect.isfunction(value) or inspect.isclass(value))
+        }
+    return Frame(
+        filename=filename,
+        lineno=line_no,
+        name=frame_summary.f_code.co_name,
+        locals=locals,
+        last_instruction=_traceback_frame_last_instruction(frame_summary),
+    )
+
+
+def _traceback_append_exception_group(
+    stack: Stack,
+    exc_value: BaseException,
+    grouped_exceptions: Set[BaseException],
+    extract: Callable[..., Trace],
+    *,
+    show_locals: bool,
+    locals_max_length: int,
+    locals_max_string: int,
+    locals_hide_dunder: bool,
+    locals_hide_sunder: bool,
+) -> None:
+    if sys.version_info < (3, 11):
+        return
+    from builtins import BaseExceptionGroup, ExceptionGroup
+
+    if not isinstance(exc_value, (BaseExceptionGroup, ExceptionGroup)):
+        return
+    stack.is_group = True
+    for exception in exc_value.exceptions:
+        if exception in grouped_exceptions:
+            continue
+        grouped_exceptions.add(exception)
+        stack.exceptions.append(
+            extract(
+                type(exception),
+                exception,
+                exception.__traceback__,
+                show_locals=show_locals,
+                locals_max_length=locals_max_length,
+                locals_hide_dunder=locals_hide_dunder,
+                locals_hide_sunder=locals_hide_sunder,
+                _visited_exceptions=grouped_exceptions,
+            )
+        )
+
+
+def _traceback_set_syntax_error(
+    stack: Stack, exc_value: BaseException, notes: List[str]
+) -> None:
+    if not isinstance(exc_value, SyntaxError):
+        return
+    stack.syntax_error = _SyntaxError(
+        offset=exc_value.offset or 0,
+        filename=exc_value.filename or "?",
+        lineno=exc_value.lineno or 0,
+        line=exc_value.text or "",
+        msg=exc_value.msg,
+        notes=notes,
+    )
+
+
+def _traceback_walk_stack_frames(
+    stack: Stack,
+    traceback: Optional[TracebackType],
+    *,
+    import_cwd: str,
+    show_locals: bool,
+    locals_max_length: int,
+    locals_max_string: int,
+    locals_max_depth: Optional[int],
+    locals_hide_dunder: bool,
+    locals_hide_sunder: bool,
+) -> None:
+    append = stack.frames.append
+    for frame_summary, line_no in walk_tb(traceback):
+        if frame_summary.f_locals.get("_rich_traceback_omit", False):
+            continue
+        frame = _traceback_build_frame(
+            frame_summary,
+            line_no,
+            import_cwd=import_cwd,
+            show_locals=show_locals,
+            locals_max_length=locals_max_length,
+            locals_max_string=locals_max_string,
+            locals_max_depth=locals_max_depth,
+            locals_hide_dunder=locals_hide_dunder,
+            locals_hide_sunder=locals_hide_sunder,
+        )
+        append(frame)
+        if frame_summary.f_locals.get("_rich_traceback_guard", False):
+            del stack.frames[:]
+
+
+def _traceback_next_linked_exception(
+    exc_value: BaseException,
+    grouped_exceptions: Set[BaseException],
+) -> Optional[Tuple[Type[BaseException], BaseException, Optional[TracebackType], bool]]:
+    if grouped_exceptions:
+        return None
+    cause = getattr(exc_value, "__cause__", None)
+    if cause is not None and cause is not exc_value:
+        return cause.__class__, cause, cause.__traceback__, True
+    cause = exc_value.__context__
+    if cause is not None and not getattr(exc_value, "__suppress_context__", False):
+        return cause.__class__, cause, cause.__traceback__, False
+    return None
+
+
+def _traceback_render_locals(
+    frame: Frame,
+    *,
+    indent_guides: bool,
+    locals_max_length: int,
+    locals_max_string: int,
+    locals_max_depth: Optional[int],
+    locals_overflow: Optional[OverflowMethod],
+) -> Iterable[ConsoleRenderable]:
+    if frame.locals:
+        yield render_scope(
+            frame.locals,
+            title="locals",
+            indent_guides=indent_guides,
+            max_length=locals_max_length,
+            max_string=locals_max_string,
+            max_depth=locals_max_depth,
+            overflow=locals_overflow,
+        )
+
+
+def _traceback_frame_header_text(
+    frame: Frame,
+    *,
+    path_highlighter: "PathHighlighter",
+    first: bool,
+) -> Text:
+    if os.path.exists(frame.filename):
+        return Text.assemble(
+            path_highlighter(Text(frame.filename, style="pygments.string")),
+            (":", "pygments.text"),
+            (str(frame.lineno), "pygments.number"),
+            " in ",
+            (frame.name, "pygments.function"),
+            style="pygments.text",
+        )
+    return Text.assemble(
+        "in ",
+        (frame.name, "pygments.function"),
+        (":", "pygments.text"),
+        (str(frame.lineno), "pygments.number"),
+        style="pygments.text",
+    )
+
+
+def _traceback_stylize_last_instruction(
+    syntax: Syntax,
+    frame: Frame,
+    code_lines: List[str],
+) -> None:
+    if frame.last_instruction is None:
+        return
+    start, end = frame.last_instruction
+    for line1, column1, column2 in _iter_syntax_lines(start, end):
+        try:
+            if column1 == 0:
+                line = code_lines[line1 - 1]
+                column1 = len(line) - len(line.lstrip())
+            if column2 == -1:
+                column2 = len(code_lines[line1 - 1])
+        except IndexError:
+            continue
+        syntax.stylize_range(
+            style="traceback.error_range",
+            start=(line1, column1),
+            end=(line1, column2),
+        )
+
+
+def _traceback_render_frame_code(
+    frame: Frame,
+    traceback: "Traceback",
+    *,
+    theme: Optional[str],
+    render_locals: Callable[[Frame], Iterable[ConsoleRenderable]],
+) -> Iterable[Union[str, Text, Columns, Syntax]]:
+    if frame.filename.startswith("<"):
+        yield from render_locals(frame)
+        return
+    suppressed = any(
+        frame.filename.startswith(path) for path in traceback.suppress
+    )
+    if suppressed:
+        return
+    try:
+        code_lines = linecache.getlines(frame.filename)
+        code = "".join(code_lines)
+        if not code:
+            return
+        lexer_name = traceback._guess_lexer(frame.filename, code)
+        syntax = Syntax(
+            code,
+            lexer_name,
+            theme=theme,
+            line_numbers=True,
+            line_range=(
+                frame.lineno - traceback.extra_lines,
+                frame.lineno + traceback.extra_lines,
+            ),
+            highlight_lines={frame.lineno},
+            word_wrap=traceback.word_wrap,
+            code_width=traceback.code_width,
+            indent_guides=traceback.indent_guides,
+            dedent=False,
+        )
+        yield ""
+    except Exception as error:
+        yield Text.assemble((f"\n{error}", "traceback.error"))
+        return
+    _traceback_stylize_last_instruction(syntax, frame, code_lines)
+    yield (
+        Columns([syntax, *render_locals(frame)], padding=1)
+        if frame.locals
+        else syntax
+    )
 
 
 class PathHighlighter(RegexHighlighter):
@@ -291,6 +617,18 @@ class Traceback:
         ".pyx": "cython",
         ".pxi": "pyrex",
     }
+
+    def _init_suppress_paths(self, suppress: Iterable[Union[str, ModuleType]]) -> None:
+        self.suppress = []
+        for suppress_entity in suppress:
+            if isinstance(suppress_entity, str):
+                path = suppress_entity
+            else:
+                assert (
+                    suppress_entity.__file__ is not None
+                ), f"{suppress_entity!r} must be a module with '__file__' attribute"
+                path = os.path.dirname(suppress_entity.__file__)
+            self.suppress.append(os.path.normpath(os.path.abspath(path)))
 
     def __init__(
         self,
@@ -336,17 +674,7 @@ class Traceback:
         self.locals_hide_sunder = locals_hide_sunder
         self.locals_overflow = locals_overlow
 
-        self.suppress: Sequence[str] = []
-        for suppress_entity in suppress:
-            if not isinstance(suppress_entity, str):
-                assert (
-                    suppress_entity.__file__ is not None
-                ), f"{suppress_entity!r} must be a module with '__file__' attribute"
-                path = os.path.dirname(suppress_entity.__file__)
-            else:
-                path = suppress_entity
-            path = os.path.normpath(os.path.abspath(path))
-            self.suppress.append(path)
+        self._init_suppress_paths(suppress)
         self.max_frames = max(4, max_frames) if max_frames > 0 else 0
 
     @classmethod
@@ -465,7 +793,7 @@ class Traceback:
         stacks: List[Stack] = []
         is_cause = False
 
-        from rich import _IMPORT_CWD
+        _IMPORT_CWD = import_attr('rich', '_IMPORT_CWD')
 
         notes: List[str] = getattr(exc_value, "__notes__", None) or []
 
@@ -473,155 +801,45 @@ class Traceback:
             set() if _visited_exceptions is None else _visited_exceptions
         )
 
-        def safe_str(_object: Any) -> str:
-            """Don't allow exceptions from __str__ to propagate."""
-            try:
-                return str(_object)
-            except Exception:
-                return "<exception str() failed>"
-
         while True:
             stack = Stack(
-                exc_type=safe_str(exc_type.__name__),
-                exc_value=safe_str(exc_value),
+                exc_type=_traceback_safe_str(exc_type.__name__),
+                exc_value=_traceback_safe_str(exc_value),
                 is_cause=is_cause,
                 notes=notes,
             )
 
-            if sys.version_info >= (3, 11):
-                if isinstance(exc_value, (BaseExceptionGroup, ExceptionGroup)):
-                    stack.is_group = True
-                    for exception in exc_value.exceptions:
-                        if exception in grouped_exceptions:
-                            continue
-                        grouped_exceptions.add(exception)
-                        stack.exceptions.append(
-                            Traceback.extract(
-                                type(exception),
-                                exception,
-                                exception.__traceback__,
-                                show_locals=show_locals,
-                                locals_max_length=locals_max_length,
-                                locals_hide_dunder=locals_hide_dunder,
-                                locals_hide_sunder=locals_hide_sunder,
-                                _visited_exceptions=grouped_exceptions,
-                            )
-                        )
-
-            if isinstance(exc_value, SyntaxError):
-                stack.syntax_error = _SyntaxError(
-                    offset=exc_value.offset or 0,
-                    filename=exc_value.filename or "?",
-                    lineno=exc_value.lineno or 0,
-                    line=exc_value.text or "",
-                    msg=exc_value.msg,
-                    notes=notes,
-                )
-
+            _traceback_append_exception_group(
+                stack,
+                exc_value,
+                grouped_exceptions,
+                cls.extract,
+                show_locals=show_locals,
+                locals_max_length=locals_max_length,
+                locals_max_string=locals_max_string,
+                locals_hide_dunder=locals_hide_dunder,
+                locals_hide_sunder=locals_hide_sunder,
+            )
+            _traceback_set_syntax_error(stack, exc_value, notes)
             stacks.append(stack)
-            append = stack.frames.append
+            _traceback_walk_stack_frames(
+                stack,
+                traceback,
+                import_cwd=_IMPORT_CWD,
+                show_locals=show_locals,
+                locals_max_length=locals_max_length,
+                locals_max_string=locals_max_string,
+                locals_max_depth=locals_max_depth,
+                locals_hide_dunder=locals_hide_dunder,
+                locals_hide_sunder=locals_hide_sunder,
+            )
 
-            def get_locals(
-                iter_locals: Iterable[Tuple[str, object]],
-            ) -> Iterable[Tuple[str, object]]:
-                """Extract locals from an iterator of key pairs."""
-                if not (locals_hide_dunder or locals_hide_sunder):
-                    yield from iter_locals
-                    return
-                for key, value in iter_locals:
-                    if locals_hide_dunder and key.startswith("__"):
-                        continue
-                    if locals_hide_sunder and key.startswith("_"):
-                        continue
-                    yield key, value
+            linked = _traceback_next_linked_exception(exc_value, grouped_exceptions)
+            if linked is None:
+                break  # pragma: no cover
+            exc_type, exc_value, traceback, is_cause = linked
 
-            for frame_summary, line_no in walk_tb(traceback):
-                filename = frame_summary.f_code.co_filename
-
-                last_instruction: Optional[Tuple[Tuple[int, int], Tuple[int, int]]]
-                last_instruction = None
-                if sys.version_info >= (3, 11):
-                    instruction_index = frame_summary.f_lasti // 2
-                    instruction_position = next(
-                        islice(
-                            frame_summary.f_code.co_positions(),
-                            instruction_index,
-                            instruction_index + 1,
-                        )
-                    )
-                    (
-                        start_line,
-                        end_line,
-                        start_column,
-                        end_column,
-                    ) = instruction_position
-                    if (
-                        start_line is not None
-                        and end_line is not None
-                        and start_column is not None
-                        and end_column is not None
-                    ):
-                        last_instruction = (
-                            (start_line, start_column),
-                            (end_line, end_column),
-                        )
-
-                if filename and not filename.startswith("<"):
-                    if not os.path.isabs(filename):
-                        filename = os.path.join(_IMPORT_CWD, filename)
-                if frame_summary.f_locals.get("_rich_traceback_omit", False):
-                    continue
-
-                frame = Frame(
-                    filename=filename or "?",
-                    lineno=line_no,
-                    name=frame_summary.f_code.co_name,
-                    locals=(
-                        {
-                            key: pretty.traverse(
-                                value,
-                                max_length=locals_max_length,
-                                max_string=locals_max_string,
-                                max_depth=locals_max_depth,
-                            )
-                            for key, value in get_locals(frame_summary.f_locals.items())
-                            if not (inspect.isfunction(value) or inspect.isclass(value))
-                        }
-                        if show_locals
-                        else None
-                    ),
-                    last_instruction=last_instruction,
-                )
-                append(frame)
-                if frame_summary.f_locals.get("_rich_traceback_guard", False):
-                    del stack.frames[:]
-
-            if not grouped_exceptions:
-                cause = getattr(exc_value, "__cause__", None)
-                if cause is not None and cause is not exc_value:
-                    exc_type = cause.__class__
-                    exc_value = cause
-                    # __traceback__ can be None, e.g. for exceptions raised by the
-                    # 'multiprocessing' module
-                    traceback = cause.__traceback__
-                    is_cause = True
-                    continue
-
-                cause = exc_value.__context__
-                if cause is not None and not getattr(
-                    exc_value, "__suppress_context__", False
-                ):
-                    exc_type = cause.__class__
-                    exc_value = cause
-                    traceback = cause.__traceback__
-                    is_cause = False
-                    continue
-            # No cover, code is reached but coverage doesn't recognize it.
-            break  # pragma: no cover
-
-        trace = Trace(stacks=stacks)
-
-        return trace
+        return Trace(stacks=stacks)
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -770,16 +988,14 @@ class Traceback:
         theme = self.theme
 
         def render_locals(frame: Frame) -> Iterable[ConsoleRenderable]:
-            if frame.locals:
-                yield render_scope(
-                    frame.locals,
-                    title="locals",
-                    indent_guides=self.indent_guides,
-                    max_length=self.locals_max_length,
-                    max_string=self.locals_max_string,
-                    max_depth=self.locals_max_depth,
-                    overflow=self.locals_overflow,
-                )
+            yield from _traceback_render_locals(
+                frame,
+                indent_guides=self.indent_guides,
+                locals_max_length=self.locals_max_length,
+                locals_max_string=self.locals_max_string,
+                locals_max_depth=self.locals_max_depth,
+                locals_overflow=self.locals_overflow,
+            )
 
         exclude_frames: Optional[range] = None
         if self.max_frames != 0:
@@ -804,95 +1020,17 @@ class Traceback:
                 excluded = False
 
             first = frame_index == 0
-            frame_filename = frame.filename
-            suppressed = any(frame_filename.startswith(path) for path in self.suppress)
-
-            if os.path.exists(frame.filename):
-                text = Text.assemble(
-                    path_highlighter(Text(frame.filename, style="pygments.string")),
-                    (":", "pygments.text"),
-                    (str(frame.lineno), "pygments.number"),
-                    " in ",
-                    (frame.name, "pygments.function"),
-                    style="pygments.text",
-                )
-            else:
-                text = Text.assemble(
-                    "in ",
-                    (frame.name, "pygments.function"),
-                    (":", "pygments.text"),
-                    (str(frame.lineno), "pygments.number"),
-                    style="pygments.text",
-                )
             if not frame.filename.startswith("<") and not first:
                 yield ""
-            yield text
-            if frame.filename.startswith("<"):
-                yield from render_locals(frame)
-                continue
-            if not suppressed:
-                try:
-                    code_lines = linecache.getlines(frame.filename)
-                    code = "".join(code_lines)
-                    if not code:
-                        # code may be an empty string if the file doesn't exist, OR
-                        # if the traceback filename is generated dynamically
-                        continue
-                    lexer_name = self._guess_lexer(frame.filename, code)
-                    syntax = Syntax(
-                        code,
-                        lexer_name,
-                        theme=theme,
-                        line_numbers=True,
-                        line_range=(
-                            frame.lineno - self.extra_lines,
-                            frame.lineno + self.extra_lines,
-                        ),
-                        highlight_lines={frame.lineno},
-                        word_wrap=self.word_wrap,
-                        code_width=self.code_width,
-                        indent_guides=self.indent_guides,
-                        dedent=False,
-                    )
-                    yield ""
-                except Exception as error:
-                    yield Text.assemble(
-                        (f"\n{error}", "traceback.error"),
-                    )
-                else:
-                    if frame.last_instruction is not None:
-                        start, end = frame.last_instruction
-
-                        # Stylize a line at a time
-                        # So that indentation isn't underlined (which looks bad)
-                        for line1, column1, column2 in _iter_syntax_lines(start, end):
-                            try:
-                                if column1 == 0:
-                                    line = code_lines[line1 - 1]
-                                    column1 = len(line) - len(line.lstrip())
-                                if column2 == -1:
-                                    column2 = len(code_lines[line1 - 1])
-                            except IndexError:
-                                # Being defensive here
-                                # If last_instruction reports a line out-of-bounds, we don't want to crash
-                                continue
-
-                            syntax.stylize_range(
-                                style="traceback.error_range",
-                                start=(line1, column1),
-                                end=(line1, column2),
-                            )
-                    yield (
-                        Columns(
-                            [
-                                syntax,
-                                *render_locals(frame),
-                            ],
-                            padding=1,
-                        )
-                        if frame.locals
-                        else syntax
-                    )
+            yield _traceback_frame_header_text(
+                frame, path_highlighter=path_highlighter, first=first
+            )
+            yield from _traceback_render_frame_code(
+                frame,
+                self,
+                theme=theme,
+                render_locals=render_locals,
+            )
 
 
 if __name__ == "__main__":  # pragma: no cover
@@ -907,15 +1045,6 @@ if __name__ == "__main__":  # pragma: no cover
 
     def foo(a: Any) -> None:
         _rich_traceback_guard = True
-        zed = {
-            "characters": {
-                "Paul Atreides",
-                "Vladimir Harkonnen",
-                "Thufir Hawat",
-                "Duncan Idaho",
-            },
-            "atomic_types": (None, False, True),
-        }
         bar(a)
 
     def error() -> None:

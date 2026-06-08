@@ -1,11 +1,16 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
-from .measure import Measurement
-from .segment import Segment
-from .style import StyleType
+from ._lazy import import_attr
 
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+StyleType = import_attr('rich.style', 'StyleType')
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderResult, RenderableType
+
+
 
 
 class Styled:
@@ -35,8 +40,8 @@ class Styled:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich import print
-    from rich.panel import Panel
+    print = import_attr('rich', 'print')
+    Panel = import_attr('rich.panel', 'Panel')
 
     panel = Styled(Panel("hello"), "on blue")
     print(panel)

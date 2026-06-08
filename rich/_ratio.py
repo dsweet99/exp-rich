@@ -11,6 +11,19 @@ class Edge(Protocol):
     minimum_size: int = 1
 
 
+def _apply_flexible_portions(
+    sizes: List[Optional[int]],
+    edges: Sequence[Edge],
+    flexible_edges: List[tuple[int, Edge]],
+    portion: Fraction,
+) -> None:
+    """Assign flexible edge sizes from a ratio portion."""
+    remainder = Fraction(0)
+    for index, edge in flexible_edges:
+        size, remainder = divmod(portion * edge.ratio + remainder, 1)
+        sizes[index] = size
+
+
 def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
     """Divide total space to satisfy size, ratio, and minimum_size, constraints.
 
@@ -63,10 +76,7 @@ def ratio_resolve(total: int, edges: Sequence[Edge]) -> List[int]:
             # Distribute flexible space and compensate for rounding error
             # Since edge sizes can only be integers we need to add the remainder
             # to the following line
-            remainder = _Fraction(0)
-            for index, edge in flexible_edges:
-                size, remainder = divmod(portion * edge.ratio + remainder, 1)
-                sizes[index] = size
+            _apply_flexible_portions(sizes, edges, flexible_edges, portion)
             break
     # Sizes now contains integers only
     return cast(List[int], sizes)

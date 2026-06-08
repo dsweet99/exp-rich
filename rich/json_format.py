@@ -1,9 +1,22 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
+import json as _stdlib_json
 from pathlib import Path
-from json import loads, dumps
 from typing import Any, Callable, Optional, Union
 
-from .text import Text
-from .highlighter import JSONHighlighter, NullHighlighter
+Text = import_attr('rich.text', 'Text')
+
+loads = _stdlib_json.loads
+dumps = _stdlib_json.dumps
+
+
+def _highlight_json(json: str, highlight: bool) -> Text:
+    JSONHighlighter = import_attr('rich.highlighter', 'JSONHighlighter')
+    NullHighlighter = import_attr('rich.highlighter', 'NullHighlighter')
+
+    highlighter = JSONHighlighter() if highlight else NullHighlighter()
+    return highlighter(json)
 
 
 class JSON:
@@ -45,8 +58,7 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
-        highlighter = JSONHighlighter() if highlight else NullHighlighter()
-        self.text = highlighter(json)
+        self.text = _highlight_json(json, highlight)
         self.text.no_wrap = True
         self.text.overflow = None
 
@@ -92,8 +104,7 @@ class JSON:
             default=default,
             sort_keys=sort_keys,
         )
-        highlighter = JSONHighlighter() if highlight else NullHighlighter()
-        json_instance.text = highlighter(json)
+        json_instance.text = _highlight_json(json, highlight)
         json_instance.text.no_wrap = True
         json_instance.text.overflow = None
         return json_instance
@@ -122,7 +133,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
     error_console = Console(stderr=True)

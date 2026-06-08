@@ -1,18 +1,21 @@
-from typing import Optional, TYPE_CHECKING
+from __future__ import annotations
 
-from .segment import Segment
-from .style import StyleType
-from ._loop import loop_last
+from ._lazy import import_attr
+from typing import TYPE_CHECKING, Optional
 
-
+Segment = import_attr('rich.segment', 'Segment')
+StyleType = import_attr('rich.style', 'StyleType')
+loop_last = import_attr('rich._loop', 'loop_last')
 if TYPE_CHECKING:
     from .console import (
         Console,
         ConsoleOptions,
         RenderResult,
         RenderableType,
-        Group,
     )
+
+
+
 
 
 class Screen:
@@ -31,7 +34,7 @@ class Screen:
         style: Optional[StyleType] = None,
         application_mode: bool = False,
     ) -> None:
-        from rich.console import Group
+        Group = import_attr('rich.console', 'Group')
 
         self.renderable = Group(*renderables)
         self.style = style

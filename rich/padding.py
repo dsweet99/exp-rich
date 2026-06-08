@@ -1,5 +1,15 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
+
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+
+PaddingDimensions = Union[int, Tuple[int], Tuple[int, int], Tuple[int, int, int, int]]
 if TYPE_CHECKING:
     from .console import (
         Console,
@@ -8,12 +18,6 @@ if TYPE_CHECKING:
         RenderResult,
     )
 
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
-from .style import Style
-
-PaddingDimensions = Union[int, Tuple[int], Tuple[int, int], Tuple[int, int, int, int]]
 
 
 class Padding(JupyterMixin):
@@ -76,6 +80,19 @@ class Padding(JupyterMixin):
     def __repr__(self) -> str:
         return f"Padding({self.renderable!r}, ({self.top},{self.right},{self.bottom},{self.left}))"
 
+    def _padding_side_segments(
+        self, width: int, style: Optional[Style]
+    ) -> tuple[Optional[Segment], List[Segment]]:
+        """Build left pad and right pad/newline segments."""
+        _Segment = Segment
+        left = _Segment(" " * self.left, style) if self.left else None
+        right = (
+            [_Segment(f'{" " * self.right}', style), _Segment.line()]
+            if self.right
+            else [_Segment.line()]
+        )
+        return left, right
+
     def __rich_console__(
         self, console: "Console", options: "ConsoleOptions"
     ) -> "RenderResult":
@@ -97,17 +114,10 @@ class Padding(JupyterMixin):
         lines = console.render_lines(
             self.renderable, render_options, style=style, pad=True
         )
-        _Segment = Segment
-
-        left = _Segment(" " * self.left, style) if self.left else None
-        right = (
-            [_Segment(f'{" " * self.right}', style), _Segment.line()]
-            if self.right
-            else [_Segment.line()]
-        )
+        left, right = self._padding_side_segments(width, style)
         blank_line: Optional[List[Segment]] = None
         if self.top:
-            blank_line = [_Segment(f'{" " * width}\n', style)]
+            blank_line = [Segment(f'{" " * width}\n', style)]
             yield from blank_line * self.top
         if left:
             for line in lines:
@@ -119,7 +129,7 @@ class Padding(JupyterMixin):
                 yield from line
                 yield from right
         if self.bottom:
-            blank_line = blank_line or [_Segment(f'{" " * width}\n', style)]
+            blank_line = blank_line or [Segment(f'{" " * width}\n', style)]
             yield from blank_line * self.bottom
 
     def __rich_measure__(
@@ -136,6 +146,6 @@ class Padding(JupyterMixin):
 
 
 if __name__ == "__main__":  #  pragma: no cover
-    from rich import print
+    print = import_attr('rich', 'print')
 
     print(Padding("Hello, World", (2, 4), style="on blue"))

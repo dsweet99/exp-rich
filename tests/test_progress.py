@@ -194,10 +194,10 @@ def make_progress() -> Progress:
         _environ={},
     )
     progress = Progress(console=console, get_time=fake_time, auto_refresh=False)
-    task1 = progress.add_task("foo")
+    progress.add_task("foo")
     task2 = progress.add_task("bar", total=30)
     progress.advance(task2, 16)
-    task3 = progress.add_task("baz", visible=False)
+    progress.add_task("baz", visible=False)
     task4 = progress.add_task("egg")
     progress.remove_task(task4)
     task4 = progress.add_task("foo2", completed=50, start=False)
@@ -426,7 +426,7 @@ def test_task_start() -> None:
 
     task = Task(TaskID(1), "foo", 100, 0, _get_time=get_time)
     task.start_time = get_time()
-    assert task.started == True
+    assert task.started
     assert task.elapsed == 0
     current_time += 1
     assert task.elapsed == 1
@@ -481,7 +481,7 @@ def test_reset() -> None:
     )
     assert task.total == 200
     assert task.completed == 20
-    assert task.visible == False
+    assert not task.visible
     assert task.description == "bar"
     assert task.fields == {"example": "egg"}
     assert not task._progress
@@ -598,7 +598,7 @@ def test_open() -> None:
         legacy_windows=False,
         _environ={},
     )
-    progress = Progress(
+    Progress(
         console=console,
     )
 
@@ -644,6 +644,13 @@ def test_wrap_file() -> None:
         os.remove(filename)
 
 
+def _read_via_progress_wrap(progress: Progress, filename: str, total: int) -> bytes:
+    with open(filename, "rb") as file:
+        task_id = progress.add_task("Reading", total=total)
+        with progress.wrap_file(file, task_id=task_id) as wrapped:
+            return wrapped.read()
+
+
 def test_wrap_file_task_total() -> None:
     console = Console(
         file=io.StringIO(),
@@ -653,19 +660,14 @@ def test_wrap_file_task_total() -> None:
         legacy_windows=False,
         _environ={},
     )
-    progress = Progress(
-        console=console,
-    )
-
+    progress = Progress(console=console)
     fd, filename = tempfile.mkstemp()
     with os.fdopen(fd, "wb") as f:
         total = f.write(b"Hello, World!")
     try:
         with progress:
-            with open(filename, "rb") as file:
-                task_id = progress.add_task("Reading", total=total)
-                with progress.wrap_file(file, task_id=task_id) as f:
-                    assert f.read() == b"Hello, World!"
+            data = _read_via_progress_wrap(progress, filename, total)
+        assert data == b"Hello, World!"
     finally:
         os.remove(filename)
 

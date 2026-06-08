@@ -1,7 +1,11 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import IO, Dict, List, Mapping, Optional
 
-from .default_styles import DEFAULT_STYLES
-from .style import Style, StyleType
+DEFAULT_STYLES = import_attr('rich.default_styles', 'DEFAULT_STYLES')
+Style = import_attr('rich.style', 'Style')
+StyleType = import_attr('rich.style', 'StyleType')
 
 
 class Theme:

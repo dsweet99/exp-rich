@@ -1,11 +1,15 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from types import TracebackType
 from typing import Optional, Type
 
-from .console import Console, RenderableType
-from .jupyter import JupyterMixin
-from .live import Live
-from .spinner import Spinner
-from .style import StyleType
+Console = import_attr('rich.console', 'Console')
+RenderableType = import_attr('rich.console', 'RenderableType')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Live = import_attr('rich.live', 'Live')
+Spinner = import_attr('rich.spinner', 'Spinner')
+StyleType = import_attr('rich.style', 'StyleType')
 
 
 class Status(JupyterMixin):
@@ -109,7 +113,7 @@ class Status(JupyterMixin):
 if __name__ == "__main__":  # pragma: no cover
     from time import sleep
 
-    from .console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
     with console.status("[magenta]Covid detector booting up") as status:

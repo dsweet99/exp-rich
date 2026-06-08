@@ -28,34 +28,30 @@ COLUMN_DATA = [
 ]
 
 
+def _render_column_layouts(console: Console, columns: Columns) -> None:
+    layouts = [
+        ("optimal, expand", {"expand": True}),
+        ("column first, optimal", {"column_first": True, "expand": False}),
+        ("column first, right to left", {"right_to_left": True}),
+        ("equal columns, expand", {"equal": True, "expand": True}),
+        ("fixed width", {"width": 16, "expand": False}),
+    ]
+    for title, attrs in layouts:
+        console.rule(title)
+        for key, value in attrs.items():
+            setattr(columns, key, value)
+        console.print(columns)
+
+
 def render():
     console = Console(file=io.StringIO(), width=100, legacy_windows=False)
-
     console.rule("empty")
-    empty_columns = Columns([])
-    console.print(empty_columns)
+    console.print(Columns([]))
     columns = Columns(COLUMN_DATA)
     columns.add_renderable("Myrmecophaga tridactyla")
     console.rule("optimal")
     console.print(columns)
-    console.rule("optimal, expand")
-    columns.expand = True
-    console.print(columns)
-    console.rule("column first, optimal")
-    columns.column_first = True
-    columns.expand = False
-    console.print(columns)
-    console.rule("column first, right to left")
-    columns.right_to_left = True
-    console.print(columns)
-    console.rule("equal columns, expand")
-    columns.equal = True
-    columns.expand = True
-    console.print(columns)
-    console.rule("fixed width")
-    columns.width = 16
-    columns.expand = False
-    console.print(columns)
+    _render_column_layouts(console, columns)
     console.print()
     render_result = console.file.getvalue()
     print(render_result)

@@ -1,17 +1,110 @@
-from itertools import chain
-from typing import TYPE_CHECKING, Iterable, Optional, Literal
+from __future__ import annotations
 
-from .constrain import Constrain
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
-from .style import StyleType
+from ._lazy import import_attr
+from itertools import chain
+from typing import TYPE_CHECKING, Callable, Iterable, Optional, Literal
+
+Constrain = import_attr('rich.constrain', 'Constrain')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+StyleType = import_attr('rich.style', 'StyleType')
 
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderableType, RenderResult
 
 AlignMethod = Literal["left", "center", "right"]
 VerticalAlignMethod = Literal["top", "middle", "bottom"]
+
+
+def _align_left_segments(
+    lines: list,
+    excess_space: int,
+    style: "StyleType | None",
+    pad: bool,
+    new_line: "Segment",
+) -> Iterable["Segment"]:
+    pad_segment = Segment(" " * excess_space, style) if pad else None
+    for line in lines:
+        yield from line
+        if pad_segment:
+            yield pad_segment
+        yield new_line
+
+
+def _align_center_segments(
+    lines: list,
+    excess_space: int,
+    style: "StyleType | None",
+    pad: bool,
+    new_line: "Segment",
+) -> Iterable["Segment"]:
+    left = excess_space // 2
+    pad_left = Segment(" " * left, style)
+    pad_right = Segment(" " * (excess_space - left), style) if pad else None
+    for line in lines:
+        if left:
+            yield pad_left
+        yield from line
+        if pad_right:
+            yield pad_right
+        yield new_line
+
+
+def _align_right_segments(
+    lines: list,
+    excess_space: int,
+    style: "StyleType | None",
+    new_line: "Segment",
+) -> Iterable["Segment"]:
+    pad_segment = Segment(" " * excess_space, style)
+    for line in lines:
+        yield pad_segment
+        yield from line
+        yield new_line
+
+
+def _align_generate_segments(
+    align: AlignMethod,
+    lines: list,
+    excess_space: int,
+    style: "StyleType | None",
+    pad: bool,
+    new_line: "Segment",
+) -> Iterable["Segment"]:
+    """Yield horizontally aligned segment lines."""
+    if excess_space <= 0:
+        for line in lines:
+            yield from line
+            yield new_line
+        return
+    if align == "left":
+        yield from _align_left_segments(lines, excess_space, style, pad, new_line)
+        return
+    if align == "center":
+        yield from _align_center_segments(lines, excess_space, style, pad, new_line)
+        return
+    yield from _align_right_segments(lines, excess_space, style, new_line)
+
+
+def _vertical_align_segments(
+    vertical: VerticalAlignMethod,
+    vertical_height: int,
+    height: int,
+    horizontal_segments: Iterable["Segment"],
+    blank_lines: Callable[[int], Iterable["Segment"]],
+) -> Iterable["Segment"]:
+    if vertical == "top":
+        return chain(horizontal_segments, blank_lines(vertical_height - height))
+    if vertical == "middle":
+        top_space = (vertical_height - height) // 2
+        bottom_space = vertical_height - top_space - height
+        return chain(
+            blank_lines(top_space),
+            horizontal_segments,
+            blank_lines(bottom_space),
+        )
+    return chain(blank_lines(vertical_height - height), horizontal_segments)
 
 
 class Align(JupyterMixin):
@@ -158,45 +251,9 @@ class Align(JupyterMixin):
         excess_space = options.max_width - width
         style = console.get_style(self.style) if self.style is not None else None
 
-        def generate_segments() -> Iterable[Segment]:
-            if excess_space <= 0:
-                # Exact fit
-                for line in lines:
-                    yield from line
-                    yield new_line
-
-            elif align == "left":
-                # Pad on the right
-                pad = Segment(" " * excess_space, style) if self.pad else None
-                for line in lines:
-                    yield from line
-                    if pad:
-                        yield pad
-                    yield new_line
-
-            elif align == "center":
-                # Pad left and right
-                left = excess_space // 2
-                pad = Segment(" " * left, style)
-                pad_right = (
-                    Segment(" " * (excess_space - left), style) if self.pad else None
-                )
-                for line in lines:
-                    if left:
-                        yield pad
-                    yield from line
-                    if pad_right:
-                        yield pad_right
-                    yield new_line
-
-            elif align == "right":
-                # Padding on left
-                pad = Segment(" " * excess_space, style)
-                for line in lines:
-                    yield pad
-                    yield from line
-                    yield new_line
-
+        horizontal_segments = _align_generate_segments(
+            align, lines, excess_space, style, self.pad, new_line
+        )
         blank_line = (
             Segment(f"{' ' * (self.width or options.max_width)}\n", style)
             if self.pad
@@ -209,24 +266,16 @@ class Align(JupyterMixin):
                     yield blank_line
 
         vertical_height = self.height or options.height
-        iter_segments: Iterable[Segment]
         if self.vertical and vertical_height is not None:
-            if self.vertical == "top":
-                bottom_space = vertical_height - height
-                iter_segments = chain(generate_segments(), blank_lines(bottom_space))
-            elif self.vertical == "middle":
-                top_space = (vertical_height - height) // 2
-                bottom_space = vertical_height - top_space - height
-                iter_segments = chain(
-                    blank_lines(top_space),
-                    generate_segments(),
-                    blank_lines(bottom_space),
-                )
-            else:  #  self.vertical == "bottom":
-                top_space = vertical_height - height
-                iter_segments = chain(blank_lines(top_space), generate_segments())
+            iter_segments = _vertical_align_segments(
+                self.vertical,
+                vertical_height,
+                height,
+                horizontal_segments,
+                blank_lines,
+            )
         else:
-            iter_segments = generate_segments()
+            iter_segments = horizontal_segments
         if self.style:
             style = console.get_style(self.style)
             iter_segments = Segment.apply_style(iter_segments, style)

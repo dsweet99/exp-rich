@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from ._lazy import import_attr, import_submodule
 import os
 import sys
 import threading
@@ -11,8 +14,8 @@ from os import PathLike
 from time import monotonic
 from types import FrameType, ModuleType, TracebackType
 from typing import (
-    IO,
     TYPE_CHECKING,
+    IO,
     Any,
     Callable,
     Dict,
@@ -31,35 +34,44 @@ from typing import (
     runtime_checkable,
 )
 
-from rich._null_file import NULL_FILE
+NULL_FILE = import_attr('rich._null_file', 'NULL_FILE')
 
-from . import errors, themes
-from ._emoji_replace import _emoji_replace
-from ._export_format import CONSOLE_HTML_FORMAT, CONSOLE_SVG_FORMAT
-from ._fileno import get_fileno
-from ._log_render import FormatTimeCallable, LogRender
-from .align import Align, AlignMethod
-from .color import ColorSystem, blend_rgb
-from .control import Control
-from .emoji import EmojiVariant
-from .highlighter import NullHighlighter, ReprHighlighter
-from .markup import render as render_markup
-from .measure import Measurement, measure_renderables
-from .pager import Pager, SystemPager
-from .protocol import rich_cast
-from .region import Region
-from .screen import Screen
-from .segment import Segment
-from .style import Style, StyleType
-from .styled import Styled
-from .terminal_theme import DEFAULT_TERMINAL_THEME, SVG_EXPORT_THEME, TerminalTheme
-from .text import Text, TextType
-from .theme import Theme, ThemeStack
+errors = import_submodule('rich.errors')
+themes = import_submodule('rich.themes')
+_emoji_replace = import_attr('rich._emoji_replace', '_emoji_replace')
+CONSOLE_HTML_FORMAT = import_attr('rich._export_format', 'CONSOLE_HTML_FORMAT')
+CONSOLE_SVG_FORMAT = import_attr('rich._export_format', 'CONSOLE_SVG_FORMAT')
+get_fileno = import_attr('rich._fileno', 'get_fileno')
+FormatTimeCallable = import_attr('rich._log_render', 'FormatTimeCallable')
+LogRender = import_attr('rich._log_render', 'LogRender')
+Align = import_attr('rich.align', 'Align')
+AlignMethod = import_attr('rich.align', 'AlignMethod')
+ColorSystem = import_attr('rich.color', 'ColorSystem')
+blend_rgb = import_attr('rich.color', 'blend_rgb')
+Control = import_attr('rich.control', 'Control')
+EmojiVariant = import_attr('rich.emoji', 'EmojiVariant')
+NullHighlighter = import_attr('rich.highlighter', 'NullHighlighter')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+render_markup = import_attr('rich.markup', 'render')
+Measurement = import_attr('rich.measure', 'Measurement')
+measure_renderables = import_attr('rich.measure', 'measure_renderables')
+Pager = import_attr('rich.pager', 'Pager')
+SystemPager = import_attr('rich.pager', 'SystemPager')
+rich_cast = import_attr('rich.protocol', 'rich_cast')
+Region = import_attr('rich.region', 'Region')
+Screen = import_attr('rich.screen', 'Screen')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+StyleType = import_attr('rich.style', 'StyleType')
+Styled = import_attr('rich.styled', 'Styled')
+DEFAULT_TERMINAL_THEME = import_attr('rich.terminal_theme', 'DEFAULT_TERMINAL_THEME')
+SVG_EXPORT_THEME = import_attr('rich.terminal_theme', 'SVG_EXPORT_THEME')
+TerminalTheme = import_attr('rich.terminal_theme', 'TerminalTheme')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
+Theme = import_attr('rich.theme', 'Theme')
+ThemeStack = import_attr('rich.theme', 'ThemeStack')
 
-if TYPE_CHECKING:
-    from ._windows import WindowsConsoleFeatures
-    from .live import Live
-    from .status import Status
 
 JUPYTER_DEFAULT_COLUMNS = 115
 JUPYTER_DEFAULT_LINES = 100
@@ -68,6 +80,11 @@ WINDOWS = sys.platform == "win32"
 HighlighterType = Callable[[Union[str, "Text"]], "Text"]
 JustifyMethod = Literal["default", "left", "center", "right", "full"]
 OverflowMethod = Literal["fold", "crop", "ellipsis", "ignore"]
+if TYPE_CHECKING:
+    from ._windows import WindowsConsoleFeatures
+    from .live import Live
+    from .status import Status
+
 
 
 class NoChange:
@@ -380,6 +397,18 @@ class PagerContext:
         self._console._enter_buffer()
         return self
 
+    def _pager_buffer_content(self) -> str:
+        """Render buffered segments for pager display."""
+        with self._console._lock:
+            buffer: List[Segment] = self._console._buffer[:]
+            del self._console._buffer[:]
+            segments: Iterable[Segment] = buffer
+            if not self.styles:
+                segments = Segment.strip_styles(segments)
+            elif not self.links:
+                segments = Segment.strip_links(segments)
+            return self._console._render_buffer(segments)
+
     def __exit__(
         self,
         exc_type: Optional[Type[BaseException]],
@@ -387,16 +416,7 @@ class PagerContext:
         exc_tb: Optional[TracebackType],
     ) -> None:
         if exc_type is None:
-            with self._console._lock:
-                buffer: List[Segment] = self._console._buffer[:]
-                del self._console._buffer[:]
-                segments: Iterable[Segment] = buffer
-                if not self.styles:
-                    segments = Segment.strip_styles(segments)
-                elif not self.links:
-                    segments = Segment.strip_links(segments)
-                content = self._console._render_buffer(segments)
-            self.pager.show(content)
+            self.pager.show(self._pager_buffer_content())
         self._console._exit_buffer()
 
 
@@ -508,7 +528,7 @@ def _is_jupyter() -> bool:  # pragma: no cover
         get_ipython  # type: ignore[name-defined]
     except NameError:
         return False
-    ipython = get_ipython()  # type: ignore[name-defined]
+    ipython = get_ipython()  # type: ignore[name-defined]  # noqa: F821
     shell = ipython.__class__.__name__
     if (
         "google.colab" in str(ipython.__class__)
@@ -567,7 +587,7 @@ def get_windows_console_features() -> "WindowsConsoleFeatures":  # pragma: no co
     global _windows_console_features
     if _windows_console_features is not None:
         return _windows_console_features
-    from ._windows import get_windows_console_features
+    get_windows_console_features = import_attr('rich._windows', 'get_windows_console_features')
 
     _windows_console_features = get_windows_console_features()
     return _windows_console_features
@@ -576,6 +596,337 @@ def get_windows_console_features() -> "WindowsConsoleFeatures":  # pragma: no co
 def detect_legacy_windows() -> bool:
     """Detect legacy Windows."""
     return WINDOWS and not get_windows_console_features().vt
+
+
+def _export_html_inline_segment(
+    text: str, style: Optional[Style], theme: TerminalTheme, escape_fn: Callable[[str], str]
+) -> str:
+    text = escape_fn(text)
+    if not style:
+        return text
+    rule = style.get_html_style(theme)
+    if style.link:
+        text = f'<a href="{style.link}">{text}</a>'
+    return f'<span style="{rule}">{text}</span>' if rule else text
+
+
+def _export_html_inline_fragments(
+    buffer: Iterable[Segment],
+    theme: TerminalTheme,
+    append: Callable[[str], None],
+    escape_fn: Callable[[str], str],
+) -> None:
+    for text, style, _ in Segment.filter_control(Segment.simplify(buffer)):
+        append(_export_html_inline_segment(text, style, theme, escape_fn))
+
+
+def _export_html_styled_segment(
+    text: str,
+    style: Style,
+    theme: TerminalTheme,
+    styles: Dict[str, int],
+    escape_fn: Callable[[str], str],
+) -> str:
+    text = escape_fn(text)
+    rule = style.get_html_style(theme)
+    style_number = styles.setdefault(rule, len(styles) + 1)
+    if style.link:
+        return f'<a class="r{style_number}" href="{style.link}">{text}</a>'
+    return f'<span class="r{style_number}">{text}</span>'
+
+
+def _export_html_class_fragments(
+    buffer: Iterable[Segment],
+    theme: TerminalTheme,
+    append: Callable[[str], None],
+    escape_fn: Callable[[str], str],
+) -> str:
+    styles: Dict[str, int] = {}
+    for text, style, _ in Segment.filter_control(Segment.simplify(buffer)):
+        if style:
+            append(_export_html_styled_segment(text, style, theme, styles, escape_fn))
+        else:
+            append(escape_fn(text))
+    return "\n".join(
+        f".r{style_number} {{{style_rule}}}"
+        for style_rule, style_number in styles.items()
+        if style_rule
+    )
+
+
+def _svg_style_css(style: Style, theme: TerminalTheme) -> str:
+    css_rules = []
+    color = (
+        theme.foreground_color
+        if (style.color is None or style.color.is_default)
+        else style.color.get_truecolor(theme)
+    )
+    bgcolor = (
+        theme.background_color
+        if (style.bgcolor is None or style.bgcolor.is_default)
+        else style.bgcolor.get_truecolor(theme)
+    )
+    if style.reverse:
+        color, bgcolor = bgcolor, color
+    if style.dim:
+        color = blend_rgb(color, bgcolor, 0.4)
+    css_rules.append(f"fill: {color.hex}")
+    if style.bold:
+        css_rules.append("font-weight: bold")
+    if style.italic:
+        css_rules.append("font-style: italic;")
+    if style.underline:
+        css_rules.append("text-decoration: underline;")
+    if style.strike:
+        css_rules.append("text-decoration: line-through;")
+    return ";".join(css_rules)
+
+
+def _svg_escape_text(text: str, escape_fn: Callable[[str], str]) -> str:
+    return escape_fn(text).replace(" ", "&#160;")
+
+
+def _svg_make_tag(
+    name: str, content: Optional[str] = None, **attribs: object
+) -> str:
+    def stringify(value: object) -> str:
+        if isinstance(value, float):
+            return format(value, "g")
+        return str(value)
+
+    tag_attribs = " ".join(
+        f'{k.lstrip("_").replace("_", "-")}="{stringify(v)}"' for k, v in attribs.items()
+    )
+    if content:
+        return f"<{name} {tag_attribs}>{content}</{name}>"
+    return f"<{name} {tag_attribs}/>"
+
+
+def _svg_render_line(
+    line: Iterable[Segment],
+    *,
+    y: int,
+    theme: TerminalTheme,
+    unique_id: str,
+    char_width: float,
+    char_height: float,
+    line_height: float,
+    cell_len: Callable[[str], int],
+    get_svg_style: Callable[[Style], str],
+    classes: Dict[str, int],
+    style_no: int,
+    text_backgrounds: List[str],
+    text_group: List[str],
+    escape_fn: Callable[[str], str],
+) -> int:
+    x = 0
+    for text, style, _control in line:
+        style = style or Style()
+        rules = get_svg_style(style)
+        if rules not in classes:
+            classes[rules] = style_no
+            style_no += 1
+        class_name = f"r{classes[rules]}"
+
+        if style.reverse:
+            has_background = True
+            background = (
+                theme.foreground_color.hex
+                if style.color is None
+                else style.color.get_truecolor(theme).hex
+            )
+        else:
+            bgcolor = style.bgcolor
+            has_background = bgcolor is not None and not bgcolor.is_default
+            background = (
+                theme.background_color.hex
+                if style.bgcolor is None
+                else style.bgcolor.get_truecolor(theme).hex
+            )
+
+        text_length = cell_len(text)
+        if has_background:
+            text_backgrounds.append(
+                _svg_make_tag(
+                    "rect",
+                    fill=background,
+                    x=x * char_width,
+                    y=y * line_height + 1.5,
+                    width=char_width * text_length,
+                    height=line_height + 0.25,
+                    shape_rendering="crispEdges",
+                )
+            )
+
+        if text != " " * len(text):
+            text_group.append(
+                _svg_make_tag(
+                    "text",
+                    _svg_escape_text(text, escape_fn),
+                    _class=f"{unique_id}-{class_name}",
+                    x=x * char_width,
+                    y=y * line_height + char_height,
+                    textLength=char_width * len(text),
+                    clip_path=f"url(#{unique_id}-line-{y})",
+                )
+            )
+        x += cell_len(text)
+    return style_no
+
+
+def _svg_compose_document(
+    *,
+    unique_id: str,
+    y: int,
+    width: int,
+    char_width: float,
+    char_height: float,
+    line_height: float,
+    padding_width: int,
+    padding_height: int,
+    margin_left: int,
+    margin_top: int,
+    margin_width: int,
+    margin_height: int,
+    padding_left: int,
+    padding_top: int,
+    classes: Dict[str, int],
+    text_backgrounds: List[str],
+    text_group: List[str],
+    theme: TerminalTheme,
+    title: str,
+    code_format: str,
+    escape_fn: Callable[[str], str],
+) -> str:
+    line_offsets = [line_no * line_height + 1.5 for line_no in range(y)]
+    lines = "\n".join(
+        f"""<clipPath id="{unique_id}-line-{line_no}">
+    {_svg_make_tag("rect", x=0, y=offset, width=char_width * width, height=line_height + 0.25)}
+            </clipPath>"""
+        for line_no, offset in enumerate(line_offsets)
+    )
+    styles = "\n".join(
+        f".{unique_id}-r{rule_no} {{ {css} }}" for css, rule_no in classes.items()
+    )
+    terminal_width = ceil(width * char_width + padding_width)
+    terminal_height = (y + 1) * line_height + padding_height
+    chrome = _svg_make_tag(
+        "rect",
+        fill=theme.background_color.hex,
+        stroke="rgba(255,255,255,0.35)",
+        stroke_width="1",
+        x=margin_left,
+        y=margin_top,
+        width=terminal_width,
+        height=terminal_height,
+        rx=8,
+    )
+    if title:
+        chrome += _svg_make_tag(
+            "text",
+            _svg_escape_text(title, escape_fn),
+            _class=f"{unique_id}-title",
+            fill=theme.foreground_color.hex,
+            text_anchor="middle",
+            x=terminal_width // 2,
+            y=margin_top + char_height + 6,
+        )
+    chrome += """
+            <g transform="translate(26,22)">
+            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
+            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
+            <circle cx="44" cy="0" r="7" fill="#28c840"/>
+            </g>
+        """
+    return code_format.format(
+        unique_id=unique_id,
+        char_width=char_width,
+        char_height=char_height,
+        line_height=line_height,
+        terminal_width=char_width * width - 1,
+        terminal_height=(y + 1) * line_height - 1,
+        width=terminal_width + margin_width,
+        height=terminal_height + margin_height,
+        terminal_x=margin_left + padding_left,
+        terminal_y=margin_top + padding_top,
+        styles=styles,
+        chrome=chrome,
+        backgrounds="".join(text_backgrounds),
+        matrix="".join(text_group),
+        lines=lines,
+    )
+
+
+def _svg_export_layout(font_aspect_ratio: float) -> Dict[str, float]:
+    char_height = 20
+    char_width = char_height * font_aspect_ratio
+    line_height = char_height * 1.22
+    margin_top = margin_right = margin_bottom = margin_left = 1.0
+    padding_top = 40.0
+    padding_right = padding_bottom = padding_left = 8.0
+    return {
+        "char_height": char_height,
+        "char_width": char_width,
+        "line_height": line_height,
+        "margin_top": margin_top,
+        "margin_right": margin_right,
+        "margin_bottom": margin_bottom,
+        "margin_left": margin_left,
+        "padding_top": padding_top,
+        "padding_right": padding_right,
+        "padding_bottom": padding_bottom,
+        "padding_left": padding_left,
+        "padding_width": padding_left + padding_right,
+        "padding_height": padding_top + padding_bottom,
+        "margin_width": margin_left + margin_right,
+        "margin_height": margin_top + margin_bottom,
+    }
+
+
+def _svg_export_unique_id(segments: Iterable[Segment], title: str) -> str:
+    import zlib
+
+    payload = (
+        ("".join(repr(segment) for segment in segments)).encode("utf-8", "ignore")
+        + title.encode("utf-8", "ignore")
+    )
+    return "terminal-" + str(zlib.adler32(payload))
+
+
+def _svg_export_render_lines(
+    segments: Iterable[Segment],
+    *,
+    width: int,
+    theme: TerminalTheme,
+    unique_id: str,
+    layout: Dict[str, float],
+    get_svg_style: Callable[[Style], str],
+    classes: Dict[str, int],
+    style_no: int,
+    text_backgrounds: List[str],
+    text_group: List[str],
+    cell_len: Callable[[str], int],
+    escape_fn: Callable[[str], str],
+) -> Tuple[int, int]:
+    y = 0
+    for y, line in enumerate(Segment.split_and_crop_lines(segments, length=width)):
+        style_no = _svg_render_line(
+            line,
+            y=y,
+            theme=theme,
+            unique_id=unique_id,
+            char_width=layout["char_width"],
+            char_height=layout["char_height"],
+            line_height=layout["line_height"],
+            cell_len=cell_len,
+            get_svg_style=get_svg_style,
+            classes=classes,
+            style_no=style_no,
+            text_backgrounds=text_backgrounds,
+            text_group=text_group,
+            escape_fn=escape_fn,
+        )
+    return y, style_no
 
 
 class Console:
@@ -654,33 +1005,72 @@ class Console:
         if _environ is not None:
             self._environ = _environ
 
-        self.is_jupyter = _is_jupyter() if force_jupyter is None else force_jupyter
-        if self.is_jupyter:
-            if width is None:
-                jupyter_columns = self._environ.get("JUPYTER_COLUMNS")
-                if jupyter_columns is not None and jupyter_columns.isdigit():
-                    width = int(jupyter_columns)
-                else:
-                    width = JUPYTER_DEFAULT_COLUMNS
-            if height is None:
-                jupyter_lines = self._environ.get("JUPYTER_LINES")
-                if jupyter_lines is not None and jupyter_lines.isdigit():
-                    height = int(jupyter_lines)
-                else:
-                    height = JUPYTER_DEFAULT_LINES
+        width, height = self._init_jupyter_dimensions(force_jupyter, width, height)
+        self._init_basic_options(
+            tab_size, record, markup, emoji, emoji_variant, highlight, legacy_windows
+        )
+        width, height = self._init_terminal_dimensions(width, height)
+        self.soft_wrap = soft_wrap
+        self._width = width
+        self._height = height
+        self._init_color_and_output(
+            color_system, force_terminal, file, quiet, stderr, no_color
+        )
+        self._init_logging_and_style(
+            log_time, log_path, log_time_format, highlighter, safe_box,
+            get_datetime, get_time, style,
+        )
+        self._init_interactive(force_interactive)
+        self._init_thread_state(theme)
 
+    def _init_jupyter_dimensions(
+        self,
+        force_jupyter: Optional[bool],
+        width: Optional[int],
+        height: Optional[int],
+    ) -> tuple[Optional[int], Optional[int]]:
+        self.is_jupyter = _is_jupyter() if force_jupyter is None else force_jupyter
+        if not self.is_jupyter:
+            return width, height
+        if width is None:
+            jupyter_columns = self._environ.get("JUPYTER_COLUMNS")
+            if jupyter_columns is not None and jupyter_columns.isdigit():
+                width = int(jupyter_columns)
+            else:
+                width = JUPYTER_DEFAULT_COLUMNS
+        if height is None:
+            jupyter_lines = self._environ.get("JUPYTER_LINES")
+            if jupyter_lines is not None and jupyter_lines.isdigit():
+                height = int(jupyter_lines)
+            else:
+                height = JUPYTER_DEFAULT_LINES
+        return width, height
+
+    def _init_basic_options(
+        self,
+        tab_size: int,
+        record: bool,
+        markup: bool,
+        emoji: bool,
+        emoji_variant: Optional[EmojiVariant],
+        highlight: bool,
+        legacy_windows: Optional[bool],
+    ) -> None:
         self.tab_size = tab_size
         self.record = record
         self._markup = markup
         self._emoji = emoji
-        self._emoji_variant: Optional[EmojiVariant] = emoji_variant
+        self._emoji_variant = emoji_variant
         self._highlight = highlight
-        self.legacy_windows: bool = (
+        self.legacy_windows = (
             (detect_legacy_windows() and not self.is_jupyter)
             if legacy_windows is None
             else legacy_windows
         )
 
+    def _init_terminal_dimensions(
+        self, width: Optional[int], height: Optional[int]
+    ) -> tuple[Optional[int], Optional[int]]:
         if width is None:
             columns = self._environ.get("COLUMNS")
             if columns is not None and columns.isdigit():
@@ -689,65 +1079,78 @@ class Console:
             lines = self._environ.get("LINES")
             if lines is not None and lines.isdigit():
                 height = int(lines)
+        return width, height
 
-        self.soft_wrap = soft_wrap
-        self._width = width
-        self._height = height
-
+    def _init_color_and_output(
+        self,
+        color_system: Optional[str],
+        force_terminal: Optional[bool],
+        file: Optional[IO[str]],
+        quiet: bool,
+        stderr: bool,
+        no_color: Optional[bool],
+    ) -> None:
         self._color_system: Optional[ColorSystem]
-
-        self._force_terminal = None
-        if force_terminal is not None:
-            self._force_terminal = force_terminal
-
+        self._force_terminal = force_terminal
         self._file = file
         self.quiet = quiet
         self.stderr = stderr
-
         if color_system is None:
             self._color_system = None
         elif color_system == "auto":
             self._color_system = self._detect_color_system()
         else:
             self._color_system = COLOR_SYSTEMS[color_system]
-
         self._lock = threading.RLock()
-        self._log_render = LogRender(
-            show_time=log_time,
-            show_path=log_path,
-            time_format=log_time_format,
-        )
-        self.highlighter: HighlighterType = highlighter or _null_highlighter
-        self.safe_box = safe_box
-        self.get_datetime = get_datetime or datetime.now
-        self.get_time = get_time or monotonic
-        self.style = style
         self.no_color = (
             no_color
             if no_color is not None
             else self._environ.get("NO_COLOR", "") != ""
         )
+
+    def _init_logging_and_style(
+        self,
+        log_time: bool,
+        log_path: bool,
+        log_time_format: Union[str, FormatTimeCallable],
+        highlighter: Optional["HighlighterType"],
+        safe_box: bool,
+        get_datetime: Optional[Callable[[], datetime]],
+        get_time: Optional[Callable[[], float]],
+        style: Optional[StyleType],
+    ) -> None:
+        self._log_render = LogRender(
+            show_time=log_time,
+            show_path=log_path,
+            time_format=log_time_format,
+        )
+        self.highlighter = highlighter or _null_highlighter
+        self.safe_box = safe_box
+        self.get_datetime = get_datetime or datetime.now
+        self.get_time = get_time or monotonic
+        self.style = style
+
+    def _init_interactive(self, force_interactive: Optional[bool]) -> None:
         if force_interactive is None:
             tty_interactive = self._environ.get("TTY_INTERACTIVE", None)
-            if tty_interactive is not None:
-                if tty_interactive == "0":
-                    force_interactive = False
-                elif tty_interactive == "1":
-                    force_interactive = True
-
+            if tty_interactive == "0":
+                force_interactive = False
+            elif tty_interactive == "1":
+                force_interactive = True
         self.is_interactive = (
             (self.is_terminal and not self.is_dumb_terminal)
             if force_interactive is None
             else force_interactive
         )
 
+    def _init_thread_state(self, theme: Optional[Theme]) -> None:
         self._record_buffer_lock = threading.RLock()
         self._thread_locals = ConsoleThreadLocals(
             theme_stack=ThemeStack(themes.DEFAULT if theme is None else theme)
         )
-        self._record_buffer: List[Segment] = []
-        self._render_hooks: List[RenderHook] = []
-        self._live_stack: List[Live] = []
+        self._record_buffer = []
+        self._render_hooks = []
+        self._live_stack = []
         self._is_alt_screen = False
 
     def __repr__(self) -> str:
@@ -1175,7 +1578,7 @@ class Console:
         Returns:
             Status: A Status object that may be used as a context manager.
         """
-        from .status import Status
+        Status = import_attr('rich.status', 'Status')
 
         status_renderable = Status(
             status,
@@ -1497,6 +1900,45 @@ class Console:
                 f"Failed to get style {name!r}; {error}"
             ) from None
 
+    def _collect_renderable_object(
+        self,
+        renderable: Any,
+        *,
+        append_text: Callable[[Text], None],
+        append: Callable[[ConsoleRenderable], None],
+        check_text: Callable[[], None],
+        emoji: Optional[bool],
+        markup: Optional[bool],
+        highlight: Optional[bool],
+        highlighter: HighlighterType,
+        is_expandable: Callable[[Any], bool],
+    ) -> None:
+        renderable = rich_cast(renderable)
+        if isinstance(renderable, str):
+            append_text(
+                self.render_str(
+                    renderable,
+                    emoji=emoji,
+                    markup=markup,
+                    highlight=highlight,
+                    highlighter=highlighter,
+                )
+            )
+            return
+        if isinstance(renderable, Text):
+            append_text(renderable)
+            return
+        if isinstance(renderable, ConsoleRenderable):
+            check_text()
+            append(renderable)
+            return
+        if is_expandable(renderable):
+            check_text()
+            Pretty = import_attr('rich.pretty', 'Pretty')
+            append(Pretty(renderable, highlighter=highlighter))
+            return
+        append_text(highlighter(str(renderable)))
+
     def _collect_renderables(
         self,
         objects: Iterable[Any],
@@ -1523,13 +1965,6 @@ class Console:
             List[ConsoleRenderable]: A list of things to render.
         """
 
-        def is_expandable(obj: object) -> bool:
-            """Check if an object is expandable by pretty printer."""
-            # Permit lazy loading
-            from .pretty import is_expandable as _is_expandable
-
-            return _is_expandable(obj)
-
         renderables: List[ConsoleRenderable] = []
         _append = renderables.append
         text: List[Text] = []
@@ -1549,34 +1984,23 @@ class Console:
 
         def check_text() -> None:
             if text:
-                sep_text = Text(sep, justify=justify, end=end)
                 append(sep_text.join(text))
                 text.clear()
 
+        sep_text = Text(sep, justify=justify, end=end)
+        is_expandable = import_attr('rich.pretty', 'is_expandable')
         for renderable in objects:
-            renderable = rich_cast(renderable)
-            if isinstance(renderable, str):
-                append_text(
-                    self.render_str(
-                        renderable,
-                        emoji=emoji,
-                        markup=markup,
-                        highlight=highlight,
-                        highlighter=_highlighter,
-                    )
-                )
-            elif isinstance(renderable, Text):
-                append_text(renderable)
-            elif isinstance(renderable, ConsoleRenderable):
-                check_text()
-                append(renderable)
-            elif is_expandable(renderable):
-                check_text()
-                from .pretty import Pretty
-
-                append(Pretty(renderable, highlighter=_highlighter))
-            else:
-                append_text(_highlighter(str(renderable)))
+            self._collect_renderable_object(
+                renderable,
+                append_text=append_text,
+                append=append,
+                check_text=check_text,
+                emoji=emoji,
+                markup=markup,
+                highlight=highlight,
+                highlighter=_highlighter,
+                is_expandable=is_expandable,
+            )
 
         check_text()
 
@@ -1602,7 +2026,7 @@ class Console:
             style (str, optional): Style of line. Defaults to "rule.line".
             align (str, optional): How to align the title, one of "left", "center", or "right". Defaults to "center".
         """
-        from .rule import Rule
+        Rule = import_attr('rich.rule', 'Rule')
 
         rule = Rule(title=title, characters=characters, style=style, align=align)
         self.print(rule)
@@ -1648,6 +2072,49 @@ class Console:
             crop=False,
             end=end,
         )
+
+    def _render_print_segments(
+        self,
+        renderables: List[ConsoleRenderable],
+        render_options: "ConsoleOptions",
+        style: Optional[Union[str, Style]],
+    ) -> List[Segment]:
+        new_segments: List[Segment] = []
+        extend = new_segments.extend
+        render = self.render
+        if style is None:
+            for renderable in renderables:
+                extend(render(renderable, render_options))
+            return new_segments
+        render_style = self.get_style(style)
+        new_line = Segment.line()
+        for renderable in renderables:
+            for line, add_new_line in Segment.split_lines_terminator(
+                render(renderable, render_options)
+            ):
+                extend(Segment.apply_style(line, render_style))
+                if add_new_line:
+                    new_segments.append(new_line)
+        return new_segments
+
+    def _buffer_print_segments(
+        self,
+        new_segments: List[Segment],
+        *,
+        crop: bool,
+        new_line_start: bool,
+    ) -> None:
+        if new_line_start:
+            if len("".join(segment.text for segment in new_segments).splitlines()) > 1:
+                new_segments.insert(0, Segment.line())
+        if crop:
+            buffer_extend = self._buffer.extend
+            for line in Segment.split_and_crop_lines(
+                new_segments, self.width, pad=False
+            ):
+                buffer_extend(line)
+        else:
+            self._buffer.extend(new_segments)
 
     def print(
         self,
@@ -1723,37 +2190,12 @@ class Console:
                 highlight=highlight,
             )
 
-            new_segments: List[Segment] = []
-            extend = new_segments.extend
-            render = self.render
-            if style is None:
-                for renderable in renderables:
-                    extend(render(renderable, render_options))
-            else:
-                render_style = self.get_style(style)
-                new_line = Segment.line()
-                for renderable in renderables:
-                    for line, add_new_line in Segment.split_lines_terminator(
-                        render(renderable, render_options)
-                    ):
-                        extend(Segment.apply_style(line, render_style))
-                        if add_new_line:
-                            new_segments.append(new_line)
-
-            if new_line_start:
-                if (
-                    len("".join(segment.text for segment in new_segments).splitlines())
-                    > 1
-                ):
-                    new_segments.insert(0, Segment.line())
-            if crop:
-                buffer_extend = self._buffer.extend
-                for line in Segment.split_and_crop_lines(
-                    new_segments, self.width, pad=False
-                ):
-                    buffer_extend(line)
-            else:
-                self._buffer.extend(new_segments)
+            new_segments = self._render_print_segments(
+                renderables, render_options, style
+            )
+            self._buffer_print_segments(
+                new_segments, crop=crop, new_line_start=new_line_start
+            )
 
     def print_json(
         self,
@@ -1784,7 +2226,7 @@ class Console:
                 in to something that can be JSON encoded. Defaults to None.
             sort_keys (bool, optional): Sort dictionary keys. Defaults to False.
         """
-        from rich.json import JSON
+        JSON = import_attr('rich.json_format', 'JSON')
 
         if json is None:
             json_renderable = JSON.from_data(
@@ -1892,7 +2334,7 @@ class Console:
             suppress (Iterable[Union[str, ModuleType]]): Optional sequence of modules or paths to exclude from traceback.
             max_frames (int): Maximum number of frames to show in a traceback, 0 for no maximum. Defaults to 100.
         """
-        from .traceback import Traceback
+        Traceback = import_attr('rich.traceback', 'Traceback')
 
         traceback = Traceback(
             width=width,
@@ -1944,6 +2386,19 @@ class Console:
             frame_info = stack()[offset]
             return frame_info.filename, frame_info.lineno, frame_info.frame.f_locals
 
+    def _log_write_renderables(self, renderables: Iterable[ConsoleRenderable]) -> None:
+        new_segments: List[Segment] = []
+        extend = new_segments.extend
+        render = self.render
+        render_options = self.options
+        for renderable in renderables:
+            extend(render(renderable, render_options))
+        buffer_extend = self._buffer.extend
+        for line in Segment.split_and_crop_lines(
+            new_segments, self.width, pad=False
+        ):
+            buffer_extend(line)
+
     def log(
         self,
         *objects: Any,
@@ -1994,7 +2449,7 @@ class Console:
             link_path = None if filename.startswith("<") else os.path.abspath(filename)
             path = filename.rpartition(os.sep)[-1]
             if log_locals:
-                from .scope import render_scope
+                render_scope = import_attr('rich.scope', 'render_scope')
 
                 locals_map = {
                     key: value
@@ -2015,17 +2470,7 @@ class Console:
             ]
             for hook in render_hooks:
                 renderables = hook.process_renderables(renderables)
-            new_segments: List[Segment] = []
-            extend = new_segments.extend
-            render = self.render
-            render_options = self.options
-            for renderable in renderables:
-                extend(render(renderable, render_options))
-            buffer_extend = self._buffer.extend
-            for line in Segment.split_and_crop_lines(
-                new_segments, self.width, pad=False
-            ):
-                buffer_extend(line)
+            self._log_write_renderables(renderables)
 
     def on_broken_pipe(self) -> None:
         """This function is called when a `BrokenPipeError` is raised.
@@ -2056,78 +2501,81 @@ class Console:
         except BrokenPipeError:
             self.on_broken_pipe()
 
+    def _maybe_record_buffer(self) -> None:
+        if self.record and not self._buffer_index:
+            with self._record_buffer_lock:
+                self._record_buffer.extend(self._buffer[:])
+
+    def _flush_jupyter_buffer(self) -> None:
+        display = import_attr('rich.jupyter', 'display')
+        display(self._buffer, self._render_buffer(self._buffer[:]))
+        del self._buffer[:]
+
+    def _write_rendered_text(self, text: str) -> None:
+        try:
+            self.file.write(text)
+        except UnicodeEncodeError as error:
+            error.reason = f"{error.reason}\n*** You may need to add PYTHONIOENCODING=utf-8 to your environment ***"
+            raise
+
+    def _write_rendered_text_batched(self, text: str) -> None:
+        MAX_WRITE = 32 * 1024 // 4
+        write = self.file.write
+        if len(text) <= MAX_WRITE:
+            self._write_rendered_text(text)
+            return
+        batch: List[str] = []
+        batch_append = batch.append
+        size = 0
+        for line in text.splitlines(True):
+            if size + len(line) > MAX_WRITE and batch:
+                write("".join(batch))
+                batch.clear()
+                size = 0
+            batch_append(line)
+            size += len(line)
+        if batch:
+            write("".join(batch))
+
+    def _flush_legacy_windows_buffer(self) -> None:
+        LegacyWindowsTerm = import_attr('rich._win32_console', 'LegacyWindowsTerm')
+        legacy_windows_render = import_attr('rich._windows_renderer', 'legacy_windows_render')
+        buffer = self._buffer[:]
+        if self.no_color and self._color_system:
+            buffer = list(Segment.remove_color(buffer))
+        legacy_windows_render(buffer, LegacyWindowsTerm(self.file))
+
+    def _flush_windows_buffer(self) -> None:
+        use_legacy_windows_render = False
+        if self.legacy_windows:
+            fileno = get_fileno(self.file)
+            if fileno is not None:
+                use_legacy_windows_render = fileno in _STD_STREAMS_OUTPUT
+        if use_legacy_windows_render:
+            self._flush_legacy_windows_buffer()
+        else:
+            self._write_rendered_text_batched(self._render_buffer(self._buffer[:]))
+        self.file.flush()
+        del self._buffer[:]
+
+    def _flush_posix_buffer(self) -> None:
+        self._write_rendered_text(self._render_buffer(self._buffer[:]))
+        self.file.flush()
+        del self._buffer[:]
+
     def _write_buffer(self) -> None:
         """Write the buffer to the output file."""
 
         with self._lock:
-            if self.record and not self._buffer_index:
-                with self._record_buffer_lock:
-                    self._record_buffer.extend(self._buffer[:])
-
-            if self._buffer_index == 0:
-                if self.is_jupyter:  # pragma: no cover
-                    from .jupyter import display
-
-                    display(self._buffer, self._render_buffer(self._buffer[:]))
-                    del self._buffer[:]
-                else:
-                    if WINDOWS:
-                        use_legacy_windows_render = False
-                        if self.legacy_windows:
-                            fileno = get_fileno(self.file)
-                            if fileno is not None:
-                                use_legacy_windows_render = (
-                                    fileno in _STD_STREAMS_OUTPUT
-                                )
-
-                        if use_legacy_windows_render:
-                            from rich._win32_console import LegacyWindowsTerm
-                            from rich._windows_renderer import legacy_windows_render
-
-                            buffer = self._buffer[:]
-                            if self.no_color and self._color_system:
-                                buffer = list(Segment.remove_color(buffer))
-
-                            legacy_windows_render(buffer, LegacyWindowsTerm(self.file))
-                        else:
-                            # Either a non-std stream on legacy Windows, or modern Windows.
-                            text = self._render_buffer(self._buffer[:])
-                            # https://bugs.python.org/issue37871
-                            # https://github.com/python/cpython/issues/82052
-                            # We need to avoid writing more than 32Kb in a single write, due to the above bug
-                            write = self.file.write
-                            # Worse case scenario, every character is 4 bytes of utf-8
-                            MAX_WRITE = 32 * 1024 // 4
-                            try:
-                                if len(text) <= MAX_WRITE:
-                                    write(text)
-                                else:
-                                    batch: List[str] = []
-                                    batch_append = batch.append
-                                    size = 0
-                                    for line in text.splitlines(True):
-                                        if size + len(line) > MAX_WRITE and batch:
-                                            write("".join(batch))
-                                            batch.clear()
-                                            size = 0
-                                        batch_append(line)
-                                        size += len(line)
-                                    if batch:
-                                        write("".join(batch))
-                                        batch.clear()
-                            except UnicodeEncodeError as error:
-                                error.reason = f"{error.reason}\n*** You may need to add PYTHONIOENCODING=utf-8 to your environment ***"
-                                raise
-                    else:
-                        text = self._render_buffer(self._buffer[:])
-                        try:
-                            self.file.write(text)
-                        except UnicodeEncodeError as error:
-                            error.reason = f"{error.reason}\n*** You may need to add PYTHONIOENCODING=utf-8 to your environment ***"
-                            raise
-
-                    self.file.flush()
-                    del self._buffer[:]
+            self._maybe_record_buffer()
+            if self._buffer_index != 0:
+                return
+            if self.is_jupyter:  # pragma: no cover
+                self._flush_jupyter_buffer()
+            elif WINDOWS:
+                self._flush_windows_buffer()
+            else:
+                self._flush_posix_buffer()
 
     def _render_buffer(self, buffer: Iterable[Segment]) -> str:
         """Render buffered output, and clear buffer."""
@@ -2178,16 +2626,19 @@ class Console:
         """
         if prompt:
             self.print(prompt, markup=markup, emoji=emoji, end="")
+        return self._read_input(password=password, stream=stream)
+
+    def _read_input(
+        self, *, password: bool, stream: Optional[TextIO]
+    ) -> str:
+        """Read user input from stdin or an optional stream."""
         if password:
             import getpass as _getpass_mod
 
-            result = _getpass_mod.getpass("", stream=stream)
-        else:
-            if stream:
-                result = stream.readline()
-            else:
-                result = input()
-        return result
+            return _getpass_mod.getpass("", stream=stream)
+        if stream:
+            return stream.readline()
+        return input()
 
     def export_text(self, *, clear: bool = True, styles: bool = False) -> str:
         """Generate text from console contents (requires record=True argument in constructor).
@@ -2277,36 +2728,13 @@ class Console:
 
         with self._record_buffer_lock:
             if inline_styles:
-                for text, style, _ in Segment.filter_control(
-                    Segment.simplify(self._record_buffer)
-                ):
-                    text = escape(text)
-                    if style:
-                        rule = style.get_html_style(_theme)
-                        if style.link:
-                            text = f'<a href="{style.link}">{text}</a>'
-                        text = f'<span style="{rule}">{text}</span>' if rule else text
-                    append(text)
+                _export_html_inline_fragments(
+                    self._record_buffer, _theme, append, escape
+                )
             else:
-                styles: Dict[str, int] = {}
-                for text, style, _ in Segment.filter_control(
-                    Segment.simplify(self._record_buffer)
-                ):
-                    text = escape(text)
-                    if style:
-                        rule = style.get_html_style(_theme)
-                        style_number = styles.setdefault(rule, len(styles) + 1)
-                        if style.link:
-                            text = f'<a class="r{style_number}" href="{style.link}">{text}</a>'
-                        else:
-                            text = f'<span class="r{style_number}">{text}</span>'
-                    append(text)
-                stylesheet_rules: List[str] = []
-                stylesheet_append = stylesheet_rules.append
-                for style_rule, style_number in styles.items():
-                    if style_rule:
-                        stylesheet_append(f".r{style_number} {{{style_rule}}}")
-                stylesheet = "\n".join(stylesheet_rules)
+                stylesheet = _export_html_class_fragments(
+                    self._record_buffer, _theme, append, escape
+                )
 
             rendered_code = render_code_format.format(
                 code="".join(fragments),
@@ -2376,96 +2804,25 @@ class Console:
                 ids). If not set, this defaults to a computed value based on the recorded content.
         """
 
-        import zlib
         from html import escape
 
-        from rich.cells import cell_len
-
+        cell_len = import_attr('rich.cells', 'cell_len')
+        _theme = theme or SVG_EXPORT_THEME
         style_cache: Dict[Style, str] = {}
 
         def get_svg_style(style: Style) -> str:
-            """Convert a Style to CSS rules for SVG."""
             if style in style_cache:
                 return style_cache[style]
-            css_rules = []
-            color = (
-                _theme.foreground_color
-                if (style.color is None or style.color.is_default)
-                else style.color.get_truecolor(_theme)
-            )
-            bgcolor = (
-                _theme.background_color
-                if (style.bgcolor is None or style.bgcolor.is_default)
-                else style.bgcolor.get_truecolor(_theme)
-            )
-            if style.reverse:
-                color, bgcolor = bgcolor, color
-            if style.dim:
-                color = blend_rgb(color, bgcolor, 0.4)
-            css_rules.append(f"fill: {color.hex}")
-            if style.bold:
-                css_rules.append("font-weight: bold")
-            if style.italic:
-                css_rules.append("font-style: italic;")
-            if style.underline:
-                css_rules.append("text-decoration: underline;")
-            if style.strike:
-                css_rules.append("text-decoration: line-through;")
-
-            css = ";".join(css_rules)
+            css = _svg_style_css(style, _theme)
             style_cache[style] = css
             return css
 
-        _theme = theme or SVG_EXPORT_THEME
-
+        layout = _svg_export_layout(font_aspect_ratio)
         width = self.width
-        char_height = 20
-        char_width = char_height * font_aspect_ratio
-        line_height = char_height * 1.22
-
-        margin_top = 1
-        margin_right = 1
-        margin_bottom = 1
-        margin_left = 1
-
-        padding_top = 40
-        padding_right = 8
-        padding_bottom = 8
-        padding_left = 8
-
-        padding_width = padding_left + padding_right
-        padding_height = padding_top + padding_bottom
-        margin_width = margin_left + margin_right
-        margin_height = margin_top + margin_bottom
-
         text_backgrounds: List[str] = []
         text_group: List[str] = []
         classes: Dict[str, int] = {}
         style_no = 1
-
-        def escape_text(text: str) -> str:
-            """HTML escape text and replace spaces with nbsp."""
-            return escape(text).replace(" ", "&#160;")
-
-        def make_tag(
-            name: str, content: Optional[str] = None, **attribs: object
-        ) -> str:
-            """Make a tag from name, content, and attributes."""
-
-            def stringify(value: object) -> str:
-                if isinstance(value, (float)):
-                    return format(value, "g")
-                return str(value)
-
-            tag_attribs = " ".join(
-                f'{k.lstrip("_").replace("_", "-")}="{stringify(v)}"'
-                for k, v in attribs.items()
-            )
-            return (
-                f"<{name} {tag_attribs}>{content}</{name}>"
-                if content
-                else f"<{name} {tag_attribs}/>"
-            )
 
         with self._record_buffer_lock:
             segments = list(Segment.filter_control(self._record_buffer))
@@ -2473,135 +2830,46 @@ class Console:
                 self._record_buffer.clear()
 
         if unique_id is None:
-            unique_id = "terminal-" + str(
-                zlib.adler32(
-                    ("".join(repr(segment) for segment in segments)).encode(
-                        "utf-8",
-                        "ignore",
-                    )
-                    + title.encode("utf-8", "ignore")
-                )
-            )
-        y = 0
-        for y, line in enumerate(Segment.split_and_crop_lines(segments, length=width)):
-            x = 0
-            for text, style, _control in line:
-                style = style or Style()
-                rules = get_svg_style(style)
-                if rules not in classes:
-                    classes[rules] = style_no
-                    style_no += 1
-                class_name = f"r{classes[rules]}"
+            unique_id = _svg_export_unique_id(segments, title)
 
-                if style.reverse:
-                    has_background = True
-                    background = (
-                        _theme.foreground_color.hex
-                        if style.color is None
-                        else style.color.get_truecolor(_theme).hex
-                    )
-                else:
-                    bgcolor = style.bgcolor
-                    has_background = bgcolor is not None and not bgcolor.is_default
-                    background = (
-                        _theme.background_color.hex
-                        if style.bgcolor is None
-                        else style.bgcolor.get_truecolor(_theme).hex
-                    )
-
-                text_length = cell_len(text)
-                if has_background:
-                    text_backgrounds.append(
-                        make_tag(
-                            "rect",
-                            fill=background,
-                            x=x * char_width,
-                            y=y * line_height + 1.5,
-                            width=char_width * text_length,
-                            height=line_height + 0.25,
-                            shape_rendering="crispEdges",
-                        )
-                    )
-
-                if text != " " * len(text):
-                    text_group.append(
-                        make_tag(
-                            "text",
-                            escape_text(text),
-                            _class=f"{unique_id}-{class_name}",
-                            x=x * char_width,
-                            y=y * line_height + char_height,
-                            textLength=char_width * len(text),
-                            clip_path=f"url(#{unique_id}-line-{y})",
-                        )
-                    )
-                x += cell_len(text)
-
-        line_offsets = [line_no * line_height + 1.5 for line_no in range(y)]
-        lines = "\n".join(
-            f"""<clipPath id="{unique_id}-line-{line_no}">
-    {make_tag("rect", x=0, y=offset, width=char_width * width, height=line_height + 0.25)}
-            </clipPath>"""
-            for line_no, offset in enumerate(line_offsets)
-        )
-
-        styles = "\n".join(
-            f".{unique_id}-r{rule_no} {{ {css} }}" for css, rule_no in classes.items()
-        )
-        backgrounds = "".join(text_backgrounds)
-        matrix = "".join(text_group)
-
-        terminal_width = ceil(width * char_width + padding_width)
-        terminal_height = (y + 1) * line_height + padding_height
-        chrome = make_tag(
-            "rect",
-            fill=_theme.background_color.hex,
-            stroke="rgba(255,255,255,0.35)",
-            stroke_width="1",
-            x=margin_left,
-            y=margin_top,
-            width=terminal_width,
-            height=terminal_height,
-            rx=8,
-        )
-
-        title_color = _theme.foreground_color.hex
-        if title:
-            chrome += make_tag(
-                "text",
-                escape_text(title),
-                _class=f"{unique_id}-title",
-                fill=title_color,
-                text_anchor="middle",
-                x=terminal_width // 2,
-                y=margin_top + char_height + 6,
-            )
-        chrome += f"""
-            <g transform="translate(26,22)">
-            <circle cx="0" cy="0" r="7" fill="#ff5f57"/>
-            <circle cx="22" cy="0" r="7" fill="#febc2e"/>
-            <circle cx="44" cy="0" r="7" fill="#28c840"/>
-            </g>
-        """
-
-        svg = code_format.format(
+        y, style_no = _svg_export_render_lines(
+            segments,
+            width=width,
+            theme=_theme,
             unique_id=unique_id,
-            char_width=char_width,
-            char_height=char_height,
-            line_height=line_height,
-            terminal_width=char_width * width - 1,
-            terminal_height=(y + 1) * line_height - 1,
-            width=terminal_width + margin_width,
-            height=terminal_height + margin_height,
-            terminal_x=margin_left + padding_left,
-            terminal_y=margin_top + padding_top,
-            styles=styles,
-            chrome=chrome,
-            backgrounds=backgrounds,
-            matrix=matrix,
-            lines=lines,
+            layout=layout,
+            get_svg_style=get_svg_style,
+            classes=classes,
+            style_no=style_no,
+            text_backgrounds=text_backgrounds,
+            text_group=text_group,
+            cell_len=cell_len,
+            escape_fn=escape,
         )
-        return svg
+
+        return _svg_compose_document(
+            unique_id=unique_id,
+            y=y,
+            width=width,
+            char_width=layout["char_width"],
+            char_height=layout["char_height"],
+            line_height=layout["line_height"],
+            padding_width=int(layout["padding_width"]),
+            padding_height=int(layout["padding_height"]),
+            margin_left=int(layout["margin_left"]),
+            margin_top=int(layout["margin_top"]),
+            margin_width=int(layout["margin_width"]),
+            margin_height=int(layout["margin_height"]),
+            padding_left=int(layout["padding_left"]),
+            padding_top=int(layout["padding_top"]),
+            classes=classes,
+            text_backgrounds=text_backgrounds,
+            text_group=text_group,
+            theme=_theme,
+            title=title,
+            code_format=code_format,
+            escape_fn=escape,
+        )
 
     def save_svg(
         self,

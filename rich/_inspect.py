@@ -1,21 +1,74 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import inspect
 from inspect import cleandoc, getdoc, getfile, isclass, ismodule, signature
-from typing import Any, Collection, Iterable, Optional, Tuple, Type, Union
+from typing import Any, Callable, Collection, Iterable, List, Optional, Tuple, Type, Union
 
-from .console import Group, RenderableType
-from .control import escape_control_codes
-from .highlighter import ReprHighlighter
-from .jupyter import JupyterMixin
-from .panel import Panel
-from .pretty import Pretty
-from .table import Table
-from .text import Text, TextType
+Group = import_attr('rich.console', 'Group')
+RenderableType = import_attr('rich.console', 'RenderableType')
+escape_control_codes = import_attr('rich.control', 'escape_control_codes')
+ReprHighlighter = import_attr('rich.highlighter', 'ReprHighlighter')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Panel = import_attr('rich.panel', 'Panel')
+Pretty = import_attr('rich.pretty', 'Pretty')
+Table = import_attr('rich.table', 'Table')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 
 
 def _first_paragraph(doc: str) -> str:
     """Get the first paragraph from a docstring."""
     paragraph, _, _ = doc.partition("\n\n")
     return paragraph
+
+
+def _inspect_sort_items(item: Tuple[str, Any]) -> Tuple[bool, str]:
+    key, (_error, value) = item
+    return (callable(value), key.strip("_").lower())
+
+
+def _inspect_safe_getattr(obj: Any, attr_name: str) -> Tuple[Any, Any]:
+    try:
+        return (None, getattr(obj, attr_name))
+    except Exception as error:
+        return (error, None)
+
+
+def _inspect_filter_keys(obj: Any, *, dunder: bool, private: bool) -> Tuple[List[str], int]:
+    keys = dir(obj)
+    total_items = len(keys)
+    if not dunder:
+        keys = [key for key in keys if not key.startswith("__")]
+    if not private:
+        keys = [key for key in keys if not key.startswith("_")]
+    not_shown_count = total_items - len(keys)
+    return keys, not_shown_count
+
+
+def _inspect_render_header(
+    inspect: "Inspect", obj: Any
+) -> Iterable[RenderableType]:
+    if callable(obj):
+        signature = inspect._get_signature("", obj)
+        if signature is not None:
+            yield signature
+            yield ""
+
+    if inspect.docs:
+        _doc = inspect._get_formatted_doc(obj)
+        if _doc is not None:
+            doc_text = Text(_doc, style="inspect.help")
+            doc_text = inspect.highlighter(doc_text)
+            yield doc_text
+            yield ""
+
+    if inspect.value and not (isclass(obj) or callable(obj) or ismodule(obj)):
+        yield Panel(
+            Pretty(obj, indent_guides=True, max_length=10, max_string=60),
+            border_style="inspect.value.border",
+        )
+        yield ""
 
 
 class Inspect(JupyterMixin):
@@ -122,57 +175,57 @@ class Inspect(JupyterMixin):
 
         return qual_signature
 
+    def _render_item_row(
+        self,
+        key: str,
+        error: Any,
+        value: Any,
+        *,
+        key_text: Text,
+        add_row: Callable[..., None],
+        highlighter: ReprHighlighter,
+    ) -> None:
+        if error is not None:
+            warning = key_text.copy()
+            warning.stylize("inspect.error")
+            add_row(warning, highlighter(repr(error)))
+            return
+
+        if callable(value):
+            if not self.methods:
+                return
+            _signature_text = self._get_signature(key, value)
+            if _signature_text is None:
+                add_row(key_text, Pretty(value, highlighter=highlighter))
+                return
+            if self.docs:
+                docs = self._get_formatted_doc(value)
+                if docs is not None:
+                    _signature_text.append("\n" if "\n" in docs else " ")
+                    doc = highlighter(docs)
+                    doc.stylize("inspect.doc")
+                    _signature_text.append(doc)
+            add_row(key_text, _signature_text)
+            return
+
+        add_row(key_text, Pretty(value, highlighter=highlighter))
+
     def _render(self) -> Iterable[RenderableType]:
         """Render object."""
-
-        def sort_items(item: Tuple[str, Any]) -> Tuple[bool, str]:
-            key, (_error, value) = item
-            return (callable(value), key.strip("_").lower())
-
-        def safe_getattr(attr_name: str) -> Tuple[Any, Any]:
-            """Get attribute or any exception."""
-            try:
-                return (None, getattr(obj, attr_name))
-            except Exception as error:
-                return (error, None)
-
         obj = self.obj
-        keys = dir(obj)
-        total_items = len(keys)
-        if not self.dunder:
-            keys = [key for key in keys if not key.startswith("__")]
-        if not self.private:
-            keys = [key for key in keys if not key.startswith("_")]
-        not_shown_count = total_items - len(keys)
-        items = [(key, safe_getattr(key)) for key in keys]
+        keys, not_shown_count = _inspect_filter_keys(
+            obj, dunder=self.dunder, private=self.private
+        )
+        items = [(key, _inspect_safe_getattr(obj, key)) for key in keys]
         if self.sort:
-            items.sort(key=sort_items)
+            items.sort(key=_inspect_sort_items)
 
         items_table = Table.grid(padding=(0, 1), expand=False)
         items_table.add_column(justify="right")
         add_row = items_table.add_row
         highlighter = self.highlighter
 
-        if callable(obj):
-            signature = self._get_signature("", obj)
-            if signature is not None:
-                yield signature
-                yield ""
-
-        if self.docs:
-            _doc = self._get_formatted_doc(obj)
-            if _doc is not None:
-                doc_text = Text(_doc, style="inspect.help")
-                doc_text = highlighter(doc_text)
-                yield doc_text
-                yield ""
-
-        if self.value and not (isclass(obj) or callable(obj) or ismodule(obj)):
-            yield Panel(
-                Pretty(obj, indent_guides=True, max_length=10, max_string=60),
-                border_style="inspect.value.border",
-            )
-            yield ""
+        yield from _inspect_render_header(self, obj)
 
         for key, (error, value) in items:
             key_text = Text.assemble(
@@ -182,31 +235,14 @@ class Inspect(JupyterMixin):
                 ),
                 (" =", "inspect.equals"),
             )
-            if error is not None:
-                warning = key_text.copy()
-                warning.stylize("inspect.error")
-                add_row(warning, highlighter(repr(error)))
-                continue
-
-            if callable(value):
-                if not self.methods:
-                    continue
-
-                _signature_text = self._get_signature(key, value)
-                if _signature_text is None:
-                    add_row(key_text, Pretty(value, highlighter=highlighter))
-                else:
-                    if self.docs:
-                        docs = self._get_formatted_doc(value)
-                        if docs is not None:
-                            _signature_text.append("\n" if "\n" in docs else " ")
-                            doc = highlighter(docs)
-                            doc.stylize("inspect.doc")
-                            _signature_text.append(doc)
-
-                    add_row(key_text, _signature_text)
-            else:
-                add_row(key_text, Pretty(value, highlighter=highlighter))
+            self._render_item_row(
+                key,
+                error,
+                value,
+                key_text=key_text,
+                add_row=add_row,
+                highlighter=highlighter,
+            )
         if items_table.row_count:
             yield items_table
         elif not_shown_count:

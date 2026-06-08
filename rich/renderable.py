@@ -1,3 +1,4 @@
+from ._lazy import import_attr
 from abc import ABC
 
 
@@ -19,7 +20,7 @@ class RichRenderable(ABC):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.text import Text
+    Text = import_attr('rich.text', 'Text')
 
     t = Text()
     print(isinstance(Text, RichRenderable))

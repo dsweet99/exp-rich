@@ -1,9 +1,12 @@
+from dataclasses import dataclass
 from enum import IntEnum
 from functools import lru_cache
 from itertools import filterfalse
 from operator import attrgetter
 from typing import (
     TYPE_CHECKING,
+    Any,
+    Callable,
     Dict,
     Iterable,
     List,
@@ -244,6 +247,31 @@ class Segment(NamedTuple):
             return filterfalse(attrgetter("control"), segments)
 
     @classmethod
+    def _iter_text_line_parts(
+        cls, text: str
+    ) -> Iterable[tuple[str, bool]]:
+        """Yield text parts and newline markers from a string."""
+        while text:
+            part, new_line, text = text.partition("\n")
+            if part:
+                yield part, False
+            if new_line:
+                yield "", True
+
+    @classmethod
+    def _flush_text_to_lines(
+        cls, text: str, style: Optional[Style], line: List["Segment"]
+    ) -> Iterable[List["Segment"]]:
+        """Extend a line with text parts, yielding completed lines at newlines."""
+        append = line.append
+        for part, is_break in cls._iter_text_line_parts(text):
+            if part:
+                append(cls(part, style))
+            if is_break:
+                yield line.copy()
+                line.clear()
+
+    @classmethod
     def split_lines(cls, segments: Iterable["Segment"]) -> Iterable[List["Segment"]]:
         """Split a sequence of segments in to a list of lines.
 
@@ -254,23 +282,34 @@ class Segment(NamedTuple):
             Iterable[List[Segment]]: Iterable of segment lists, one per line.
         """
         line: List[Segment] = []
-        append = line.append
-
         for segment in segments:
             if "\n" in segment.text and not segment.control:
                 text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield line
-                        line = []
-                        append = line.append
+                yield from cls._flush_text_to_lines(text, style, line)
             else:
-                append(segment)
+                line.append(segment)
         if line:
             yield line
+
+    @classmethod
+    def _flush_text_to_terminator_lines(
+        cls,
+        text: str,
+        style: Optional[Style],
+        line_holder: List[List["Segment"]],
+    ) -> Iterable[Tuple[List["Segment"], bool]]:
+        """Yield completed lines from text containing newlines."""
+        line = line_holder[0]
+        append = line.append
+        while text:
+            _text, new_line, text = text.partition("\n")
+            if _text:
+                append(cls(_text, style))
+            if new_line:
+                yield (line, True)
+                line = []
+                line_holder[0] = line
+                append = line.append
 
     @classmethod
     def split_lines_terminator(
@@ -285,23 +324,48 @@ class Segment(NamedTuple):
             Iterable[List[Segment]]: Iterable of segment lists, one per line.
         """
         line: List[Segment] = []
+        line_holder = [line]
         append = line.append
 
         for segment in segments:
             if "\n" in segment.text and not segment.control:
                 text, style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, style))
-                    if new_line:
-                        yield (line, True)
-                        line = []
-                        append = line.append
+                yield from cls._flush_text_to_terminator_lines(text, style, line_holder)
+                line = line_holder[0]
+                append = line.append
             else:
                 append(segment)
         if line:
             yield (line, False)
+
+    @classmethod
+    def _flush_text_to_cropped_lines(
+        cls,
+        text: str,
+        segment_style: Optional[Style],
+        line_holder: List[List["Segment"]],
+        length: int,
+        style: Optional[Style],
+        pad: bool,
+        include_new_lines: bool,
+        new_line_segment: "Segment",
+    ) -> Iterable[List["Segment"]]:
+        """Yield cropped lines from text containing newlines."""
+        line = line_holder[0]
+        append = line.append
+        adjust_line_length = cls.adjust_line_length
+        while text:
+            _text, new_line, text = text.partition("\n")
+            if _text:
+                append(cls(_text, segment_style))
+            if new_line:
+                cropped_line = adjust_line_length(line, length, style=style, pad=pad)
+                if include_new_lines:
+                    cropped_line.append(new_line_segment)
+                yield cropped_line
+                line = []
+                line_holder[0] = line
+                append = line.append
 
     @classmethod
     def split_and_crop_lines(
@@ -325,30 +389,50 @@ class Segment(NamedTuple):
             Iterable[List[Segment]]: An iterable of lines of segments.
         """
         line: List[Segment] = []
+        line_holder = [line]
         append = line.append
-
         adjust_line_length = cls.adjust_line_length
         new_line_segment = cls("\n")
 
         for segment in segments:
             if "\n" in segment.text and not segment.control:
                 text, segment_style, _ = segment
-                while text:
-                    _text, new_line, text = text.partition("\n")
-                    if _text:
-                        append(cls(_text, segment_style))
-                    if new_line:
-                        cropped_line = adjust_line_length(
-                            line, length, style=style, pad=pad
-                        )
-                        if include_new_lines:
-                            cropped_line.append(new_line_segment)
-                        yield cropped_line
-                        line.clear()
+                yield from cls._flush_text_to_cropped_lines(
+                    text,
+                    segment_style,
+                    line_holder,
+                    length,
+                    style,
+                    pad,
+                    include_new_lines,
+                    new_line_segment,
+                )
+                line = line_holder[0]
+                append = line.append
             else:
                 append(segment)
         if line:
             yield adjust_line_length(line, length, style=style, pad=pad)
+
+    @classmethod
+    def _crop_segments_to_length(
+        cls, line: List["Segment"], length: int
+    ) -> List["Segment"]:
+        """Crop segments to fit within length."""
+        new_line: List[Segment] = []
+        append = new_line.append
+        line_length = 0
+        for segment in line:
+            segment_length = segment.cell_length
+            if line_length + segment_length < length or segment.control:
+                append(segment)
+                line_length += segment_length
+            else:
+                text, segment_style, _ = segment
+                text = set_cell_size(text, length - line_length)
+                append(cls(text, segment_style))
+                break
+        return new_line
 
     @classmethod
     def adjust_line_length(
@@ -370,30 +454,14 @@ class Segment(NamedTuple):
             List[Segment]: A line of segments with the desired length.
         """
         line_length = sum(segment.cell_length for segment in line)
-        new_line: List[Segment]
 
         if line_length < length:
             if pad:
-                new_line = line + [cls(" " * (length - line_length), style)]
-            else:
-                new_line = line[:]
-        elif line_length > length:
-            new_line = []
-            append = new_line.append
-            line_length = 0
-            for segment in line:
-                segment_length = segment.cell_length
-                if line_length + segment_length < length or segment.control:
-                    append(segment)
-                    line_length += segment_length
-                else:
-                    text, segment_style, _ = segment
-                    text = set_cell_size(text, length - line_length)
-                    append(cls(text, segment_style))
-                    break
-        else:
-            new_line = line[:]
-        return new_line
+                return line + [cls(" " * (length - line_length), style)]
+            return line[:]
+        if line_length > length:
+            return cls._crop_segments_to_length(line, length)
+        return line[:]
 
     @classmethod
     def get_line_length(cls, line: List["Segment"]) -> int:
@@ -638,62 +706,294 @@ class Segment(NamedTuple):
         Yields:
             [Iterable[List[Segment]]]: An iterable of Segments in List.
         """
-        split_segments: List["Segment"] = []
-        add_segment = split_segments.append
+        yield from _divide_segments_by_cuts(segments, cuts)
 
-        iter_cuts = iter(cuts)
 
-        while True:
-            cut = next(iter_cuts, -1)
-            if cut == -1:
-                return
-            if cut != 0:
-                break
-            yield []
-        pos = 0
+def _divide_skip_leading_cuts(
+    iter_cuts: Iterable[int],
+) -> Iterable[Union[List["Segment"], int]]:
+    while True:
+        cut = next(iter_cuts, -1)
+        if cut == -1:
+            return
+        if cut != 0:
+            yield cut
+            return
+        yield []
 
-        segments_clear = split_segments.clear
-        segments_copy = split_segments.copy
 
-        _cell_len = cached_cell_len
-        for segment in segments:
-            text, _style, control = segment
-            while text:
-                end_pos = pos if control else pos + _cell_len(text)
-                if end_pos < cut:
-                    add_segment(segment)
-                    pos = end_pos
-                    break
-
-                if end_pos == cut:
-                    add_segment(segment)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = end_pos
-
-                    cut = next(iter_cuts, -1)
-                    if cut == -1:
-                        if split_segments:
-                            yield segments_copy()
-                        return
-
-                    break
-
-                else:
-                    before, segment = segment.split_cells(cut - pos)
-                    text, _style, control = segment
-                    add_segment(before)
-                    yield segments_copy()
-                    segments_clear()
-                    pos = cut
-
-                cut = next(iter_cuts, -1)
-                if cut == -1:
-                    if split_segments:
-                        yield segments_copy()
-                    return
-
+def _divide_yield_if_remaining(
+    split_segments: List["Segment"],
+    segments_copy: Callable[[], List["Segment"]],
+) -> Iterable[List["Segment"]]:
+    if split_segments:
         yield segments_copy()
+
+
+def _divide_on_equal_cut(
+    segment: "Segment",
+    *,
+    pos: int,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[Union[List["Segment"], tuple[str, object]]]:
+    add_segment(segment)
+    yield segments_copy()
+    segments_clear()
+    pos = pos
+    cut = next(iter_cuts, -1)
+    if cut == -1:
+        yield from _divide_yield_if_remaining(split_segments, segments_copy)
+        yield ("stop", None)
+        return
+    yield ("break", (pos, cut))
+
+
+def _divide_on_split_cut(
+    segment: "Segment",
+    *,
+    pos: int,
+    cut: int,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[Union[List["Segment"], tuple[str, object]]]:
+    before, segment = segment.split_cells(cut - pos)
+    text, _style, control = segment
+    add_segment(before)
+    yield segments_copy()
+    segments_clear()
+    pos = cut
+    cut = next(iter_cuts, -1)
+    if cut == -1:
+        yield from _divide_yield_if_remaining(split_segments, segments_copy)
+        yield ("stop", None)
+        return
+    yield ("continue", (text, segment, pos, cut))
+
+
+def _divide_equal_cut_events(
+    segment: "Segment",
+    *,
+    pos: int,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[Union[List["Segment"], tuple[str, tuple[int, int]]]]:
+    yield from _divide_on_equal_cut(
+        segment,
+        pos=pos,
+        iter_cuts=iter_cuts,
+        split_segments=split_segments,
+        add_segment=add_segment,
+        segments_copy=segments_copy,
+        segments_clear=segments_clear,
+    )
+
+
+def _divide_split_cut_events(
+    segment: "Segment",
+    *,
+    pos: int,
+    cut: int,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[Union[List["Segment"], tuple[str, tuple[Any, "Segment", int, int]]]]:
+    yield from _divide_on_split_cut(
+        segment,
+        pos=pos,
+        cut=cut,
+        iter_cuts=iter_cuts,
+        split_segments=split_segments,
+        add_segment=add_segment,
+        segments_copy=segments_copy,
+        segments_clear=segments_clear,
+    )
+
+
+@dataclass
+class _DividePosition:
+    pos: int
+    cut: int
+
+
+def _divide_handle_equal_cut_events(
+    segment: "Segment",
+    *,
+    end_pos: int,
+    state: _DividePosition,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[List["Segment"]]:
+    for item in _divide_equal_cut_events(
+        segment,
+        pos=end_pos,
+        iter_cuts=iter_cuts,
+        split_segments=split_segments,
+        add_segment=add_segment,
+        segments_copy=segments_copy,
+        segments_clear=segments_clear,
+    ):
+        if isinstance(item, list):
+            yield item
+            continue
+        event, value = item
+        if event == "stop":
+            state.cut = -1
+            return
+        state.pos, state.cut = value
+
+
+def _divide_handle_split_cut_events(
+    segment: "Segment",
+    *,
+    state: _DividePosition,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+) -> Iterable[Union[List["Segment"], tuple[str, tuple[Any, "Segment", int, int]]]]:
+    for item in _divide_split_cut_events(
+        segment,
+        pos=state.pos,
+        cut=state.cut,
+        iter_cuts=iter_cuts,
+        split_segments=split_segments,
+        add_segment=add_segment,
+        segments_copy=segments_copy,
+        segments_clear=segments_clear,
+    ):
+        if isinstance(item, list):
+            yield item
+            continue
+        event, value = item
+        if event == "stop":
+            yield ("stop", ())
+            return
+        yield ("continue", value)
+
+
+def _divide_process_one_segment(
+    segment: "Segment",
+    *,
+    state: _DividePosition,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+    _cell_len: Callable[[str], int],
+) -> Iterable[List["Segment"]]:
+    text, _style, control = segment
+    while text:
+        end_pos = state.pos if control else state.pos + _cell_len(text)
+        if end_pos < state.cut:
+            add_segment(segment)
+            state.pos = end_pos
+            break
+
+        if end_pos == state.cut:
+            yield from _divide_handle_equal_cut_events(
+                segment,
+                end_pos=end_pos,
+                state=state,
+                iter_cuts=iter_cuts,
+                split_segments=split_segments,
+                add_segment=add_segment,
+                segments_copy=segments_copy,
+                segments_clear=segments_clear,
+            )
+            break
+
+        for item in _divide_handle_split_cut_events(
+            segment,
+            state=state,
+            iter_cuts=iter_cuts,
+            split_segments=split_segments,
+            add_segment=add_segment,
+            segments_copy=segments_copy,
+            segments_clear=segments_clear,
+        ):
+            if isinstance(item, list):
+                yield item
+                continue
+            event, value = item
+            if event == "stop":
+                state.cut = -1
+                return
+            text, segment, state.pos, state.cut = value
+
+
+def _divide_process_segments(
+    segments: Iterable["Segment"],
+    *,
+    pos: int,
+    cut: int,
+    iter_cuts: Iterable[int],
+    split_segments: List["Segment"],
+    add_segment: Callable[["Segment"], None],
+    segments_copy: Callable[[], List["Segment"]],
+    segments_clear: Callable[[], None],
+    _cell_len: Callable[[str], int],
+) -> Iterable[List["Segment"]]:
+    state = _DividePosition(pos=pos, cut=cut)
+    for segment in segments:
+        yield from _divide_process_one_segment(
+            segment,
+            state=state,
+            iter_cuts=iter_cuts,
+            split_segments=split_segments,
+            add_segment=add_segment,
+            segments_copy=segments_copy,
+            segments_clear=segments_clear,
+            _cell_len=_cell_len,
+        )
+        if state.cut == -1:
+            return
+    yield segments_copy()
+
+
+def _divide_segments_by_cuts(
+    segments: Iterable["Segment"], cuts: Iterable[int]
+) -> Iterable[List["Segment"]]:
+    split_segments: List["Segment"] = []
+    add_segment = split_segments.append
+    iter_cuts = iter(cuts)
+
+    cut: Optional[int] = None
+    for item in _divide_skip_leading_cuts(iter_cuts):
+        if isinstance(item, list):
+            yield item
+        else:
+            cut = item
+    if cut is None:
+        return
+
+    yield from _divide_process_segments(
+        segments,
+        pos=0,
+        cut=cut,
+        iter_cuts=iter_cuts,
+        split_segments=split_segments,
+        add_segment=add_segment,
+        segments_copy=split_segments.copy,
+        segments_clear=split_segments.clear,
+        _cell_len=cached_cell_len,
+    )
 
 
 class Segments:

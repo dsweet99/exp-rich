@@ -1,11 +1,18 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import Literal, Optional, Tuple
 
-from ._loop import loop_last
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .control import Control
-from .segment import ControlType, Segment
-from .style import StyleType
-from .text import Text
+loop_last = import_attr('rich._loop', 'loop_last')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderableType = import_attr('rich.console', 'RenderableType')
+RenderResult = import_attr('rich.console', 'RenderResult')
+Control = import_attr('rich.control', 'Control')
+ControlType = import_attr('rich.segment', 'ControlType')
+Segment = import_attr('rich.segment', 'Segment')
+StyleType = import_attr('rich.style', 'StyleType')
+Text = import_attr('rich.text', 'Text')
 
 VerticalOverflowMethod = Literal["crop", "ellipsis", "visible"]
 

@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 """Light wrapper around the Win32 Console API - this module should only be imported on Windows
 
 The API that this module wraps is documented at https://docs.microsoft.com/en-us/windows/console/console-functions
 """
+from ._lazy import import_attr
 
 import ctypes
 import sys
@@ -17,8 +20,8 @@ import time
 from ctypes import Structure, byref, wintypes
 from typing import IO, NamedTuple, Type, cast
 
-from rich.color import ColorSystem
-from rich.style import Style
+ColorSystem = import_attr('rich.color', 'ColorSystem')
+Style = import_attr('rich.style', 'Style')
 
 STDOUT = -11
 ENABLE_VIRTUAL_TERMINAL_PROCESSING = 4
@@ -575,7 +578,7 @@ class LegacyWindowsTerm:
 if __name__ == "__main__":
     handle = GetStdHandle()
 
-    from rich.console import Console
+    Console = import_attr('rich.console', 'Console')
 
     console = Console()
 

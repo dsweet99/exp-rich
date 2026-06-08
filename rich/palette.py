@@ -1,11 +1,15 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from math import sqrt
 from functools import lru_cache
-from typing import Sequence, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence, Tuple
 
-from .color_triplet import ColorTriplet
-
+ColorTriplet = import_attr('rich.color_triplet', 'ColorTriplet')
 if TYPE_CHECKING:
     from rich.table import Table
+
+
 
 
 class Palette:
@@ -18,10 +22,10 @@ class Palette:
         return ColorTriplet(*self._colors[number])
 
     def __rich__(self) -> "Table":
-        from rich.color import Color
-        from rich.style import Style
-        from rich.text import Text
-        from rich.table import Table
+        Color = import_attr('rich.color', 'Color')
+        Style = import_attr('rich.style', 'Style')
+        Text = import_attr('rich.text', 'Text')
+        Table = import_attr('rich.table', 'Table')
 
         table = Table(
             "index",
@@ -75,10 +79,11 @@ class Palette:
 if __name__ == "__main__":  # pragma: no cover
     import colorsys
     from typing import Iterable
-    from rich.color import Color
-    from rich.console import Console, ConsoleOptions
-    from rich.segment import Segment
-    from rich.style import Style
+    Color = import_attr('rich.color', 'Color')
+    Console = import_attr('rich.console', 'Console')
+    ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+    Segment = import_attr('rich.segment', 'Segment')
+    Style = import_attr('rich.style', 'Style')
 
     class ColorBox:
         def __rich_console__(
@@ -88,9 +93,9 @@ if __name__ == "__main__":  # pragma: no cover
             for y in range(0, height):
                 for x in range(options.max_width):
                     h = x / options.max_width
-                    l = y / (height + 1)
-                    r1, g1, b1 = colorsys.hls_to_rgb(h, l, 1.0)
-                    r2, g2, b2 = colorsys.hls_to_rgb(h, l + (1 / height / 2), 1.0)
+                    lightness = y / (height + 1)
+                    r1, g1, b1 = colorsys.hls_to_rgb(h, lightness, 1.0)
+                    r2, g2, b2 = colorsys.hls_to_rgb(h, lightness + (1 / height / 2), 1.0)
                     bgcolor = Color.from_rgb(r1 * 255, g1 * 255, b1 * 255)
                     color = Color.from_rgb(r2 * 255, g2 * 255, b2 * 255)
                     yield Segment("▄", Style(color=color, bgcolor=bgcolor))

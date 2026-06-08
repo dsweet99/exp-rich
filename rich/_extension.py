@@ -2,9 +2,7 @@ from typing import Any
 
 
 def load_ipython_extension(ip: Any) -> None:  # pragma: no cover
-    # prevent circular import
-    from rich.pretty import install
-    from rich.traceback import install as tr_install
+    from importlib import import_module
 
-    install()
-    tr_install()
+    import_module("rich.pretty").install()
+    import_module("rich.traceback").install()

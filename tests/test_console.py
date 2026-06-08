@@ -122,7 +122,7 @@ def test_console_options_update_height() -> None:
 
 def test_init() -> None:
     console = Console(color_system=None)
-    assert console._color_system == None
+    assert console._color_system is None
     console = Console(color_system="standard")
     assert console._color_system == ColorSystem.STANDARD
     console = Console(color_system="auto")
@@ -837,8 +837,8 @@ def test_update_screen_lines() -> None:
 def test_update_options_markup() -> None:
     console = Console()
     options = console.options
-    assert options.update(markup=False).markup == False
-    assert options.update(markup=True).markup == True
+    assert not options.update(markup=False).markup
+    assert options.update(markup=True).markup
 
 
 def test_print_width_zero() -> None:
@@ -870,14 +870,14 @@ def test_print_newline_start() -> None:
 
 
 def test_is_terminal_broken_file() -> None:
-    console = Console()
+    console = Console(file=io.StringIO())
 
     def _mock_isatty():
         raise ValueError()
 
     console.file.isatty = _mock_isatty
 
-    assert console.is_terminal == False
+    assert not console.is_terminal
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="not relevant on Windows")

@@ -1,16 +1,113 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from collections import defaultdict
 from itertools import chain
 from operator import itemgetter
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from .align import Align, AlignMethod
-from .console import Console, ConsoleOptions, RenderableType, RenderResult
-from .constrain import Constrain
-from .measure import Measurement
-from .padding import Padding, PaddingDimensions
-from .table import Table
-from .text import TextType
-from .jupyter import JupyterMixin
+Align = import_attr('rich.align', 'Align')
+AlignMethod = import_attr('rich.align', 'AlignMethod')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderableType = import_attr('rich.console', 'RenderableType')
+RenderResult = import_attr('rich.console', 'RenderResult')
+Constrain = import_attr('rich.constrain', 'Constrain')
+Measurement = import_attr('rich.measure', 'Measurement')
+Padding = import_attr('rich.padding', 'Padding')
+PaddingDimensions = import_attr('rich.padding', 'PaddingDimensions')
+Table = import_attr('rich.table', 'Table')
+TextType = import_attr('rich.text', 'TextType')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+
+
+def _columns_column_first_order(
+    item_count: int, column_count: int
+) -> Iterable[int]:
+    column_lengths: List[int] = [item_count // column_count] * column_count
+    for col_no in range(item_count % column_count):
+        column_lengths[col_no] += 1
+
+    row_count = (item_count + column_count - 1) // column_count
+    cells = [[-1] * column_count for _ in range(row_count)]
+    row = col = 0
+    for index in range(item_count):
+        cells[row][col] = index
+        column_lengths[col] -= 1
+        if column_lengths[col]:
+            row += 1
+        else:
+            col += 1
+            row = 0
+    for index in chain.from_iterable(cells):
+        if index == -1:
+            break
+        yield index
+
+
+def _columns_iter_renderables(
+    *,
+    column_first: bool,
+    column_count: int,
+    renderable_widths: List[int],
+    renderables: List[RenderableType],
+) -> Iterable[Tuple[int, Optional[RenderableType]]]:
+    item_count = len(renderables)
+    if column_first:
+        width_renderables = list(zip(renderable_widths, renderables))
+        for index in _columns_column_first_order(item_count, column_count):
+            yield width_renderables[index]
+    else:
+        yield from zip(renderable_widths, renderables)
+    if item_count % column_count:
+        for _ in range(column_count - (item_count % column_count)):
+            yield 0, None
+
+
+def _columns_fit_column_count(
+    *,
+    column_count: int,
+    max_width: int,
+    width_padding: int,
+    widths: Dict[int, int],
+    iter_renderables: Callable[[], Iterable[Tuple[int, Optional[RenderableType]]]],
+) -> int:
+    while column_count > 1:
+        widths.clear()
+        column_no = 0
+        for renderable_width, _ in iter_renderables():
+            widths[column_no] = max(widths[column_no], renderable_width)
+            total_width = sum(widths.values()) + width_padding * (len(widths) - 1)
+            if total_width > max_width:
+                column_count = len(widths) - 1
+                break
+            column_no = (column_no + 1) % column_count
+        else:
+            break
+    return column_count
+
+
+def _columns_prepare_renderables(
+    renderables: List[RenderableType],
+    *,
+    equal: bool,
+    align: Optional[AlignMethod],
+    renderable_widths: List[int],
+) -> List[Optional[RenderableType]]:
+    get_renderable = itemgetter(1)
+    prepared = [get_renderable(item) for item in renderables]
+    if equal:
+        prepared = [
+            None if renderable is None else Constrain(renderable, renderable_widths[0])
+            for renderable in prepared
+        ]
+    if align:
+        _Align = Align
+        prepared = [
+            None if renderable is None else _Align(renderable, align)
+            for renderable in prepared
+        ]
+    return prepared
 
 
 class Columns(JupyterMixin):
@@ -59,6 +156,67 @@ class Columns(JupyterMixin):
         """
         self.renderables.append(renderable)
 
+    def _columns_renderable_widths(
+        self, console: Console, options: ConsoleOptions, renderables: List[RenderableType]
+    ) -> List[int]:
+        get_measurement = Measurement.get
+        renderable_widths = [
+            get_measurement(console, options, renderable).maximum
+            for renderable in renderables
+        ]
+        if self.equal:
+            renderable_widths = [max(renderable_widths)] * len(renderable_widths)
+        return renderable_widths
+
+    def _columns_build_table(
+        self,
+        *,
+        max_width: int,
+        width_padding: int,
+        column_count: int,
+        renderable_widths: List[int],
+        renderables: List[RenderableType],
+        widths: Dict[int, int],
+    ) -> Table:
+        table = Table.grid(padding=self.padding, collapse_padding=True, pad_edge=False)
+        table.expand = self.expand
+        table.title = self.title
+
+        def iter_items(count: int) -> Iterable[Tuple[int, Optional[RenderableType]]]:
+            return _columns_iter_renderables(
+                column_first=self.column_first,
+                column_count=count,
+                renderable_widths=renderable_widths,
+                renderables=renderables,
+            )
+
+        if self.width is not None:
+            column_count = max_width // (self.width + width_padding)
+            for _ in range(column_count):
+                table.add_column(width=self.width)
+        else:
+            column_count = _columns_fit_column_count(
+                column_count=column_count,
+                max_width=max_width,
+                width_padding=width_padding,
+                widths=widths,
+                iter_renderables=lambda: iter_items(column_count),
+            )
+
+        prepared = _columns_prepare_renderables(
+            list(iter_items(column_count)),
+            equal=self.equal,
+            align=self.align,
+            renderable_widths=renderable_widths,
+        )
+        add_row = table.add_row
+        for start in range(0, len(prepared), column_count):
+            row = prepared[start : start + column_count]
+            if self.right_to_left:
+                row = row[::-1]
+            add_row(*row)
+        return table
+
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
@@ -71,104 +229,18 @@ class Columns(JupyterMixin):
             return
         _top, right, _bottom, left = Padding.unpack(self.padding)
         width_padding = max(left, right)
-        max_width = options.max_width
         widths: Dict[int, int] = defaultdict(int)
-        column_count = len(renderables)
-
-        get_measurement = Measurement.get
-        renderable_widths = [
-            get_measurement(console, options, renderable).maximum
-            for renderable in renderables
-        ]
-        if self.equal:
-            renderable_widths = [max(renderable_widths)] * len(renderable_widths)
-
-        def iter_renderables(
-            column_count: int,
-        ) -> Iterable[Tuple[int, Optional[RenderableType]]]:
-            item_count = len(renderables)
-            if self.column_first:
-                width_renderables = list(zip(renderable_widths, renderables))
-
-                column_lengths: List[int] = [item_count // column_count] * column_count
-                for col_no in range(item_count % column_count):
-                    column_lengths[col_no] += 1
-
-                row_count = (item_count + column_count - 1) // column_count
-                cells = [[-1] * column_count for _ in range(row_count)]
-                row = col = 0
-                for index in range(item_count):
-                    cells[row][col] = index
-                    column_lengths[col] -= 1
-                    if column_lengths[col]:
-                        row += 1
-                    else:
-                        col += 1
-                        row = 0
-                for index in chain.from_iterable(cells):
-                    if index == -1:
-                        break
-                    yield width_renderables[index]
-            else:
-                yield from zip(renderable_widths, renderables)
-            # Pad odd elements with spaces
-            if item_count % column_count:
-                for _ in range(column_count - (item_count % column_count)):
-                    yield 0, None
-
-        table = Table.grid(padding=self.padding, collapse_padding=True, pad_edge=False)
-        table.expand = self.expand
-        table.title = self.title
-
-        if self.width is not None:
-            column_count = (max_width) // (self.width + width_padding)
-            for _ in range(column_count):
-                table.add_column(width=self.width)
-        else:
-            while column_count > 1:
-                widths.clear()
-                column_no = 0
-                for renderable_width, _ in iter_renderables(column_count):
-                    widths[column_no] = max(widths[column_no], renderable_width)
-                    total_width = sum(widths.values()) + width_padding * (
-                        len(widths) - 1
-                    )
-                    if total_width > max_width:
-                        column_count = len(widths) - 1
-                        break
-                    else:
-                        column_no = (column_no + 1) % column_count
-                else:
-                    break
-
-        get_renderable = itemgetter(1)
-        _renderables = [
-            get_renderable(_renderable)
-            for _renderable in iter_renderables(column_count)
-        ]
-        if self.equal:
-            _renderables = [
-                None
-                if renderable is None
-                else Constrain(renderable, renderable_widths[0])
-                for renderable in _renderables
-            ]
-        if self.align:
-            align = self.align
-            _Align = Align
-            _renderables = [
-                None if renderable is None else _Align(renderable, align)
-                for renderable in _renderables
-            ]
-
-        right_to_left = self.right_to_left
-        add_row = table.add_row
-        for start in range(0, len(_renderables), column_count):
-            row = _renderables[start : start + column_count]
-            if right_to_left:
-                row = row[::-1]
-            add_row(*row)
-        yield table
+        renderable_widths = self._columns_renderable_widths(
+            console, options, renderables
+        )
+        yield self._columns_build_table(
+            max_width=options.max_width,
+            width_padding=width_padding,
+            column_count=len(renderables),
+            renderable_widths=renderable_widths,
+            renderables=renderables,
+            widths=widths,
+        )
 
 
 if __name__ == "__main__":  # pragma: no cover

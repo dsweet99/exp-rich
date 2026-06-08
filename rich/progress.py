@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ._lazy import import_attr, import_submodule
 
 import io
 import typing
@@ -40,16 +41,22 @@ if TYPE_CHECKING:
     # Can be replaced with `from typing import Self` in Python 3.11+
     from typing_extensions import Self  # pragma: no cover
 
-from . import filesize, get_console
-from .console import Console, Group, JustifyMethod, RenderableType
-from .highlighter import Highlighter
-from .jupyter import JupyterMixin
-from .live import Live
-from .progress_bar import ProgressBar
-from .spinner import Spinner
-from .style import StyleType
-from .table import Column, Table
-from .text import Text, TextType
+filesize = import_submodule('rich.filesize')
+get_console = import_attr('rich._get_console', 'get_console')
+Console = import_attr('rich.console', 'Console')
+Group = import_attr('rich.console', 'Group')
+JustifyMethod = import_attr('rich.console', 'JustifyMethod')
+RenderableType = import_attr('rich.console', 'RenderableType')
+Highlighter = import_attr('rich.highlighter', 'Highlighter')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Live = import_attr('rich.live', 'Live')
+ProgressBar = import_attr('rich.progress_bar', 'ProgressBar')
+Spinner = import_attr('rich.spinner', 'Spinner')
+StyleType = import_attr('rich.style', 'StyleType')
+Column = import_attr('rich.table', 'Column')
+Table = import_attr('rich.table', 'Table')
+Text = import_attr('rich.text', 'Text')
+TextType = import_attr('rich.text', 'TextType')
 
 TaskID = NewType("TaskID", int)
 
@@ -518,6 +525,20 @@ class ProgressColumn(ABC):
         """Get a table column, used to build tasks table."""
         return self._table_column or Column()
 
+    def _maybe_cached_renderable(
+        self, task: "Task", current_time: float
+    ) -> Optional[RenderableType]:
+        """Return a cached renderable when still fresh."""
+        if self.max_refresh is None or task.completed:
+            return None
+        try:
+            timestamp, renderable = self._renderable_cache[task.id]
+        except KeyError:
+            return None
+        if timestamp + self.max_refresh > current_time:
+            return renderable
+        return None
+
     def __call__(self, task: "Task") -> RenderableType:
         """Called by the Progress object to return a renderable for the given task.
 
@@ -528,14 +549,9 @@ class ProgressColumn(ABC):
             RenderableType: Anything renderable (including str).
         """
         current_time = task.get_time()
-        if self.max_refresh is not None and not task.completed:
-            try:
-                timestamp, renderable = self._renderable_cache[task.id]
-            except KeyError:
-                pass
-            else:
-                if timestamp + self.max_refresh > current_time:
-                    return renderable
+        cached = self._maybe_cached_renderable(task, current_time)
+        if cached is not None:
+            return cached
 
         renderable = self.render(task)
         self._renderable_cache[task.id] = (current_time, renderable)
@@ -1058,6 +1074,27 @@ class Task:
         self.finished_speed = None
 
 
+def _normalize_progress_open_buffering(
+    mode: Union[Literal["rb"], Literal["rt"], Literal["r"]], buffering: int
+) -> tuple[str, int, bool]:
+    _mode = "".join(sorted(mode, reverse=False))
+    if _mode not in ("br", "rt", "r"):
+        raise ValueError(f"invalid mode {mode!r}")
+    line_buffering = buffering == 1
+    if _mode == "br" and buffering == 1:
+        warnings.warn(
+            "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
+            RuntimeWarning,
+        )
+        buffering = -1
+    elif _mode in ("rt", "r"):
+        if buffering == 0:
+            raise ValueError("can't have unbuffered text I/O")
+        if buffering == 1:
+            buffering = -1
+    return _mode, buffering, line_buffering
+
+
 class Progress(JupyterMixin):
     """Renders an auto-updating progress bar(s).
 
@@ -1265,7 +1302,7 @@ class Progress(JupyterMixin):
                 total_bytes = self._tasks[task_id].total
         if total_bytes is None:
             raise ValueError(
-                f"unable to get the total number of bytes, please specify 'total'"
+                "unable to get the total number of bytes, please specify 'total'"
             )
 
         # update total of task or create new task
@@ -1340,26 +1377,10 @@ class Progress(JupyterMixin):
         Raises:
             ValueError: When an invalid mode is given.
         """
-        # normalize the mode (always rb, rt)
-        _mode = "".join(sorted(mode, reverse=False))
-        if _mode not in ("br", "rt", "r"):
-            raise ValueError(f"invalid mode {mode!r}")
+        _mode, buffering, line_buffering = _normalize_progress_open_buffering(
+            mode, buffering
+        )
 
-        # patch buffering to provide the same behaviour as the builtin `open`
-        line_buffering = buffering == 1
-        if _mode == "br" and buffering == 1:
-            warnings.warn(
-                "line buffering (buffering=1) isn't supported in binary mode, the default buffer size will be used",
-                RuntimeWarning,
-            )
-            buffering = -1
-        elif _mode in ("rt", "r"):
-            if buffering == 0:
-                raise ValueError("can't have unbuffered text I/O")
-            elif buffering == 1:
-                buffering = -1
-
-        # attempt to get the total with `os.stat`
         if total is None:
             total = stat(file).st_size
 
@@ -1414,6 +1435,48 @@ class Progress(JupyterMixin):
                 task.start_time = current_time
             task.stop_time = current_time
 
+    def _apply_task_update(
+        self,
+        task: "Task",
+        *,
+        total: Optional[float],
+        completed: Optional[float],
+        advance: Optional[float],
+        description: Optional[str],
+        visible: Optional[bool],
+        fields: Dict[str, Any],
+    ) -> float:
+        completed_start = task.completed
+        if total is not None and total != task.total:
+            task.total = total
+            task._reset()
+        if advance is not None:
+            task.completed += advance
+        if completed is not None:
+            task.completed = completed
+        if description is not None:
+            task.description = description
+        if visible is not None:
+            task.visible = visible
+        task.fields.update(fields)
+        return task.completed - completed_start
+
+    def _record_task_progress(self, task: "Task", update_completed: float) -> None:
+        current_time = self.get_time()
+        old_sample_time = current_time - self.speed_estimate_period
+        _progress = task._progress
+        popleft = _progress.popleft
+        while _progress and _progress[0].timestamp < old_sample_time:
+            popleft()
+        if update_completed > 0:
+            _progress.append(ProgressSample(current_time, update_completed))
+        if (
+            task.total is not None
+            and task.completed >= task.total
+            and task.finished_time is None
+        ):
+            task.finished_time = task.elapsed
+
     def update(
         self,
         task_id: TaskID,
@@ -1440,37 +1503,16 @@ class Progress(JupyterMixin):
         """
         with self._lock:
             task = self._tasks[task_id]
-            completed_start = task.completed
-
-            if total is not None and total != task.total:
-                task.total = total
-                task._reset()
-            if advance is not None:
-                task.completed += advance
-            if completed is not None:
-                task.completed = completed
-            if description is not None:
-                task.description = description
-            if visible is not None:
-                task.visible = visible
-            task.fields.update(fields)
-            update_completed = task.completed - completed_start
-
-            current_time = self.get_time()
-            old_sample_time = current_time - self.speed_estimate_period
-            _progress = task._progress
-
-            popleft = _progress.popleft
-            while _progress and _progress[0].timestamp < old_sample_time:
-                popleft()
-            if update_completed > 0:
-                _progress.append(ProgressSample(current_time, update_completed))
-            if (
-                task.total is not None
-                and task.completed >= task.total
-                and task.finished_time is None
-            ):
-                task.finished_time = task.elapsed
+            update_completed = self._apply_task_update(
+                task,
+                total=total,
+                completed=completed,
+                advance=advance,
+                description=description,
+                visible=visible,
+                fields=fields,
+            )
+            self._record_task_progress(task, update_completed)
 
         if refresh:
             self.refresh()
@@ -1655,10 +1697,10 @@ if __name__ == "__main__":  # pragma: no coverage
     import random
     import time
 
-    from .panel import Panel
-    from .rule import Rule
-    from .syntax import Syntax
-    from .table import Table
+    Panel = import_attr('rich.panel', 'Panel')
+    Rule = import_attr('rich.rule', 'Rule')
+    Syntax = import_attr('rich.syntax', 'Syntax')
+    Table = import_attr('rich.table', 'Table')
 
     syntax = Syntax(
         '''def loop_last(values: Iterable[T]) -> Iterable[Tuple[bool, T]]:

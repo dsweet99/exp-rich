@@ -12,10 +12,9 @@ else:
 from importlib import import_module
 from typing import TYPE_CHECKING, cast
 
+from rich._cell_types import CellTable
 from rich._unicode_data._versions import VERSIONS
 
-if TYPE_CHECKING:
-    from rich.cells import CellTable
 
 VERSION_ORDER = sorted(
     [
@@ -55,6 +54,29 @@ def _parse_version(version: str) -> tuple[int, int, int]:
     return triple
 
 
+def _resolve_unicode_version(unicode_version: str) -> str:
+    if unicode_version == "auto":
+        unicode_version = os.environ.get("UNICODE_VERSION", "latest")
+        try:
+            _parse_version(unicode_version)
+        except ValueError:
+            unicode_version = "latest"
+
+    if unicode_version == "latest":
+        return VERSIONS[-1]
+
+    try:
+        version_numbers = _parse_version(unicode_version)
+    except ValueError:
+        version_numbers = _parse_version(VERSIONS[-1])
+    major, minor, patch = version_numbers
+    version = f"{major}.{minor}.{patch}"
+    if version not in VERSION_SET:
+        insert_position = bisect.bisect_left(VERSION_ORDER, version_numbers)
+        version = VERSIONS[max(0, insert_position - 1)]
+    return version
+
+
 @cache
 def load(unicode_version: str = "auto") -> CellTable:
     """Load a cell table for the given unicode version.
@@ -63,28 +85,7 @@ def load(unicode_version: str = "auto") -> CellTable:
         unicode_version: Unicode version, or `None` to auto-detect.
 
     """
-    if unicode_version == "auto":
-        unicode_version = os.environ.get("UNICODE_VERSION", "latest")
-        try:
-            _parse_version(unicode_version)
-        except ValueError:
-            # The environment variable is invalid
-            # Fallback to using the latest version seems reasonable
-            unicode_version = "latest"
-
-    if unicode_version == "latest":
-        version = VERSIONS[-1]
-    else:
-        try:
-            version_numbers = _parse_version(unicode_version)
-        except ValueError:
-            version_numbers = _parse_version(VERSIONS[-1])
-        major, minor, patch = version_numbers
-        version = f"{major}.{minor}.{patch}"
-        if version not in VERSION_SET:
-            insert_position = bisect.bisect_left(VERSION_ORDER, version_numbers)
-            version = VERSIONS[max(0, insert_position - 1)]
-
+    version = _resolve_unicode_version(unicode_version)
     version_path_component = version.replace(".", "-")
     module_name = f".unicode{version_path_component}"
     module = import_module(module_name, "rich._unicode_data")

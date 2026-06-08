@@ -1,18 +1,25 @@
+from __future__ import annotations
+
+from ._lazy import import_attr, import_submodule
 import colorsys
 import io
 from time import process_time
 
-from rich import box
-from rich.color import Color
-from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
-from rich.markdown import Markdown
-from rich.measure import Measurement
-from rich.pretty import Pretty
-from rich.segment import Segment
-from rich.style import Style
-from rich.syntax import Syntax
-from rich.table import Table
-from rich.text import Text
+box = import_submodule('rich.box')
+Color = import_attr('rich.color', 'Color')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+Group = import_attr('rich.console', 'Group')
+RenderableType = import_attr('rich.console', 'RenderableType')
+RenderResult = import_attr('rich.console', 'RenderResult')
+Markdown = import_attr('rich.markdown', 'Markdown')
+Measurement = import_attr('rich.measure', 'Measurement')
+Pretty = import_attr('rich.pretty', 'Pretty')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
+Syntax = import_attr('rich.syntax', 'Syntax')
+Table = import_attr('rich.table', 'Table')
+Text = import_attr('rich.text', 'Text')
 
 
 class ColorBox:
@@ -22,9 +29,9 @@ class ColorBox:
         for y in range(0, 5):
             for x in range(options.max_width):
                 h = x / options.max_width
-                l = 0.1 + ((y / 5) * 0.7)
-                r1, g1, b1 = colorsys.hls_to_rgb(h, l, 1.0)
-                r2, g2, b2 = colorsys.hls_to_rgb(h, l + 0.7 / 10, 1.0)
+                lightness = 0.1 + ((y / 5) * 0.7)
+                r1, g1, b1 = colorsys.hls_to_rgb(h, lightness, 1.0)
+                r2, g2, b2 = colorsys.hls_to_rgb(h, lightness + 0.7 / 10, 1.0)
                 bgcolor = Color.from_rgb(r1 * 255, g1 * 255, b1 * 255)
                 color = Color.from_rgb(r2 * 255, g2 * 255, b2 * 255)
                 yield Segment("▄", Style(color=color, bgcolor=bgcolor))
@@ -34,6 +41,59 @@ class ColorBox:
         self, console: "Console", options: ConsoleOptions
     ) -> Measurement:
         return Measurement(1, options.max_width)
+
+
+def _comparison_table(
+    renderable1: RenderableType, renderable2: RenderableType
+) -> Table:
+    table = Table(show_header=False, pad_edge=False, box=None, expand=True)
+    table.add_column("1", ratio=1)
+    table.add_column("2", ratio=1)
+    table.add_row(renderable1, renderable2)
+    return table
+
+
+def _test_card_example_table() -> Table:
+    example_table = Table(
+        show_edge=False,
+        show_header=True,
+        expand=False,
+        row_styles=["none", "dim"],
+        box=box.SIMPLE,
+    )
+    example_table.add_column("[green]Date", style="green", no_wrap=True)
+    example_table.add_column("[blue]Title", style="blue")
+    example_table.add_column(
+        "[cyan]Production Budget", style="cyan", justify="right", no_wrap=True
+    )
+    example_table.add_column(
+        "[magenta]Box Office", style="magenta", justify="right", no_wrap=True
+    )
+    example_table.add_row(
+        "Dec 20, 2019",
+        "Star Wars: The Rise of Skywalker",
+        "$275,000,000",
+        "$375,126,118",
+    )
+    example_table.add_row(
+        "May 25, 2018",
+        "[b]Solo[/]: A Star Wars Story",
+        "$275,000,000",
+        "$393,151,347",
+    )
+    example_table.add_row(
+        "Dec 15, 2017",
+        "Star Wars Ep. VIII: The Last Jedi",
+        "$262,000,000",
+        "[bold]$1,332,539,889[/bold]",
+    )
+    example_table.add_row(
+        "May 19, 1999",
+        "Star Wars Ep. [b]I[/b]: [i]The phantom Menace",
+        "$115,000,000",
+        "$1,027,044,677",
+    )
+    return example_table
 
 
 def make_test_card() -> Table:
@@ -88,11 +148,7 @@ def make_test_card() -> Table:
     )
 
     def comparison(renderable1: RenderableType, renderable2: RenderableType) -> Table:
-        table = Table(show_header=False, pad_edge=False, box=None, expand=True)
-        table.add_column("1", ratio=1)
-        table.add_column("2", ratio=1)
-        table.add_row(renderable1, renderable2)
-        return table
+        return _comparison_table(renderable1, renderable2)
 
     table.add_row(
         "Asian\nlanguage\nsupport",
@@ -105,53 +161,7 @@ def make_test_card() -> Table:
     )
     table.add_row("Markup", markup_example)
 
-    example_table = Table(
-        show_edge=False,
-        show_header=True,
-        expand=False,
-        row_styles=["none", "dim"],
-        box=box.SIMPLE,
-    )
-    example_table.add_column("[green]Date", style="green", no_wrap=True)
-    example_table.add_column("[blue]Title", style="blue")
-    example_table.add_column(
-        "[cyan]Production Budget",
-        style="cyan",
-        justify="right",
-        no_wrap=True,
-    )
-    example_table.add_column(
-        "[magenta]Box Office",
-        style="magenta",
-        justify="right",
-        no_wrap=True,
-    )
-    example_table.add_row(
-        "Dec 20, 2019",
-        "Star Wars: The Rise of Skywalker",
-        "$275,000,000",
-        "$375,126,118",
-    )
-    example_table.add_row(
-        "May 25, 2018",
-        "[b]Solo[/]: A Star Wars Story",
-        "$275,000,000",
-        "$393,151,347",
-    )
-    example_table.add_row(
-        "Dec 15, 2017",
-        "Star Wars Ep. VIII: The Last Jedi",
-        "$262,000,000",
-        "[bold]$1,332,539,889[/bold]",
-    )
-    example_table.add_row(
-        "May 19, 1999",
-        "Star Wars Ep. [b]I[/b]: [i]The phantom Menace",
-        "$115,000,000",
-        "$1,027,044,677",
-    )
-
-    table.add_row("Tables", example_table)
+    table.add_row("Tables", _test_card_example_table())
 
     code = '''\
 def iter_last(values: Iterable[T]) -> Iterable[Tuple[bool, T]]:
@@ -207,7 +217,7 @@ Supports much of the *markdown* __syntax__!
 
 
 if __name__ == "__main__":  # pragma: no cover
-    from rich.panel import Panel
+    Panel = import_attr('rich.panel', 'Panel')
 
     console = Console(
         file=io.StringIO(),

@@ -1,11 +1,16 @@
+from __future__ import annotations
+
+from ._lazy import import_attr, import_submodule
 from operator import itemgetter
 from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, Sequence
 
-from . import errors
-from .protocol import is_renderable, rich_cast
-
+errors = import_submodule('rich.errors')
+is_renderable = import_attr('rich.protocol', 'is_renderable')
+rich_cast = import_attr('rich.protocol', 'rich_cast')
 if TYPE_CHECKING:
     from .console import Console, ConsoleOptions, RenderableType
+
+
 
 
 class Measurement(NamedTuple):

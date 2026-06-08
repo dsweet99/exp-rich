@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from itertools import zip_longest
 from typing import (
     TYPE_CHECKING,
@@ -10,6 +13,11 @@ from typing import (
     overload,
 )
 
+
+cell_len = import_attr('rich.cells', 'cell_len')
+Measurement = import_attr('rich.measure', 'Measurement')
+
+T = TypeVar("T")
 if TYPE_CHECKING:
     from .console import (
         Console,
@@ -21,10 +29,6 @@ if TYPE_CHECKING:
     )
     from .text import Text
 
-from .cells import cell_len
-from .measure import Measurement
-
-T = TypeVar("T")
 
 
 class Renderables:
@@ -108,6 +112,34 @@ class Lines:
     def pop(self, index: int = -1) -> "Text":
         return self._lines.pop(index)
 
+    def _justify_full_line(
+        self,
+        line_index: int,
+        line: "Text",
+        width: int,
+        console: "Console",
+    ) -> None:
+        Text = import_attr('rich.text', 'Text')
+        words = line.split(" ")
+        words_size = sum(cell_len(word.plain) for word in words)
+        num_spaces = len(words) - 1
+        spaces = [1 for _ in range(num_spaces)]
+        index = 0
+        if spaces:
+            while words_size + num_spaces < width:
+                spaces[len(spaces) - index - 1] += 1
+                num_spaces += 1
+                index = (index + 1) % len(spaces)
+        tokens: List[Text] = []
+        for index, (word, next_word) in enumerate(zip_longest(words, words[1:])):
+            tokens.append(word)
+            if index < len(spaces):
+                style = word.get_style_at_offset(console, -1)
+                next_style = next_word.get_style_at_offset(console, 0)
+                space_style = style if style == next_style else line.style
+                tokens.append(Text(" " * spaces[index], style=space_style))
+        self[line_index] = Text("").join(tokens)
+
     def justify(
         self,
         console: "Console",
@@ -124,44 +156,26 @@ class Lines:
             overflow (str, optional): Default overflow for text: "crop", "fold", or "ellipsis". Defaults to "fold".
 
         """
-        from .text import Text
-
         if justify == "left":
             for line in self._lines:
                 line.truncate(width, overflow=overflow, pad=True)
-        elif justify == "center":
+            return
+        if justify == "center":
             for line in self._lines:
                 line.rstrip()
                 line.truncate(width, overflow=overflow)
                 line.pad_left((width - cell_len(line.plain)) // 2)
                 line.pad_right(width - cell_len(line.plain))
-        elif justify == "right":
+            return
+        if justify == "right":
             for line in self._lines:
                 line.rstrip()
                 line.truncate(width, overflow=overflow)
                 line.pad_left(width - cell_len(line.plain))
-        elif justify == "full":
-            for line_index, line in enumerate(self._lines):
-                if line_index == len(self._lines) - 1:
-                    break
-                words = line.split(" ")
-                words_size = sum(cell_len(word.plain) for word in words)
-                num_spaces = len(words) - 1
-                spaces = [1 for _ in range(num_spaces)]
-                index = 0
-                if spaces:
-                    while words_size + num_spaces < width:
-                        spaces[len(spaces) - index - 1] += 1
-                        num_spaces += 1
-                        index = (index + 1) % len(spaces)
-                tokens: List[Text] = []
-                for index, (word, next_word) in enumerate(
-                    zip_longest(words, words[1:])
-                ):
-                    tokens.append(word)
-                    if index < len(spaces):
-                        style = word.get_style_at_offset(console, -1)
-                        next_style = next_word.get_style_at_offset(console, 0)
-                        space_style = style if style == next_style else line.style
-                        tokens.append(Text(" " * spaces[index], style=space_style))
-                self[line_index] = Text("").join(tokens)
+            return
+        if justify != "full":
+            return
+        for line_index, line in enumerate(self._lines):
+            if line_index == len(self._lines) - 1:
+                break
+            self._justify_full_line(line_index, line, width, console)

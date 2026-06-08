@@ -64,5 +64,11 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.ruff.lint.per-file-ignores]
+"examples/*" = ["E402", "F821"]
+"tests/*" = ["E402", "E722", "F811", "F821"]
+"rich/_win32_console.py" = ["E402"]
+"tools/*" = ["E402"]
+
 [tool.isort]
 profile = "black"

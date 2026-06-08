@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import List, Optional, Tuple
 
-from .color_triplet import ColorTriplet
-from .palette import Palette
+ColorTriplet = import_attr('rich.color_triplet', 'ColorTriplet')
+Palette = import_attr('rich.palette', 'Palette')
 
 _ColorTuple = Tuple[int, int, int]
 

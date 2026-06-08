@@ -1,11 +1,16 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import Optional, Union
 
-from .color import Color
-from .console import Console, ConsoleOptions, RenderResult
-from .jupyter import JupyterMixin
-from .measure import Measurement
-from .segment import Segment
-from .style import Style
+Color = import_attr('rich.color', 'Color')
+Console = import_attr('rich.console', 'Console')
+ConsoleOptions = import_attr('rich.console', 'ConsoleOptions')
+RenderResult = import_attr('rich.console', 'RenderResult')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Measurement = import_attr('rich.measure', 'Measurement')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
 
 # There are left-aligned characters for 1/8 to 7/8, but
 # the right-aligned characters exist only for 1/8 and 4/8.

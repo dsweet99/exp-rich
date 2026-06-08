@@ -1,16 +1,20 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 import sys
 from typing import TYPE_CHECKING, Literal, Optional, Union
 
-from ._emoji_replace import _emoji_replace
-from .jupyter import JupyterMixin
-from .segment import Segment
-from .style import Style
+_emoji_replace = import_attr('rich._emoji_replace', '_emoji_replace')
+JupyterMixin = import_attr('rich.jupyter', 'JupyterMixin')
+Segment = import_attr('rich.segment', 'Segment')
+Style = import_attr('rich.style', 'Style')
 
-if TYPE_CHECKING:
-    from .console import Console, ConsoleOptions, RenderResult
 
 
 EmojiVariant = Literal["emoji", "text"]
+if TYPE_CHECKING:
+    from .console import Console, ConsoleOptions, RenderResult
+
 
 
 class NoEmoji(Exception):
@@ -37,7 +41,7 @@ class Emoji(JupyterMixin):
         Raises:
             NoEmoji: If the emoji doesn't exist.
         """
-        from ._emoji_codes import EMOJI
+        EMOJI = import_attr('rich._emoji_codes', 'EMOJI')
 
         self.name = name
         self.style = style
@@ -76,12 +80,12 @@ class Emoji(JupyterMixin):
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
-    from rich.columns import Columns
-    from rich.console import Console
+    Columns = import_attr('rich.columns', 'Columns')
+    Console = import_attr('rich.console', 'Console')
 
     console = Console(record=True)
 
-    from ._emoji_codes import EMOJI
+    EMOJI = import_attr('rich._emoji_codes', 'EMOJI')
 
     columns = Columns(
         (f":{name}: {name}" for name in sorted(EMOJI.keys()) if "\u200d" not in name),

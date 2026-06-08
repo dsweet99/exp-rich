@@ -1,3 +1,4 @@
+from ._lazy import import_attr
 import sys
 from dataclasses import dataclass
 
@@ -22,12 +23,10 @@ try:
         windll = None
         raise ImportError("Not windows")
 
-    from rich._win32_console import (
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-        GetConsoleMode,
-        GetStdHandle,
-        LegacyWindowsError,
-    )
+    ENABLE_VIRTUAL_TERMINAL_PROCESSING = import_attr('rich._win32_console', 'ENABLE_VIRTUAL_TERMINAL_PROCESSING')
+    GetConsoleMode = import_attr('rich._win32_console', 'GetConsoleMode')
+    GetStdHandle = import_attr('rich._win32_console', 'GetStdHandle')
+    LegacyWindowsError = import_attr('rich._win32_console', 'LegacyWindowsError')
 
 except (AttributeError, ImportError, ValueError):
     # Fallback if we can't load the Windows DLL
@@ -65,7 +64,7 @@ if __name__ == "__main__":
     import platform
 
     features = get_windows_console_features()
-    from rich import print
+    print = import_attr('rich', 'print')
 
     print(f'platform="{platform.system()}"')
     print(repr(features))

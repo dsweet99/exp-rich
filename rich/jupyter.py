@@ -1,18 +1,20 @@
+from __future__ import annotations
+
+from ._lazy import import_attr
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Sequence
 
-if TYPE_CHECKING:
-    from rich.console import ConsoleRenderable
 
-from . import get_console
-from .segment import Segment
-from .terminal_theme import DEFAULT_TERMINAL_THEME
+get_console = import_attr('rich._get_console', 'get_console')
+Segment = import_attr('rich.segment', 'Segment')
+DEFAULT_TERMINAL_THEME = import_attr('rich.terminal_theme', 'DEFAULT_TERMINAL_THEME')
 
-if TYPE_CHECKING:
-    from rich.console import ConsoleRenderable
 
 JUPYTER_HTML_FORMAT = """\
 <pre style="white-space:pre;overflow-x:auto;line-height:normal;font-family:Menlo,'DejaVu Sans Mono',consolas,'Courier New',monospace">{code}</pre>
 """
+if TYPE_CHECKING:
+    from rich.console import ConsoleRenderable
+
 
 
 class JupyterRenderable:
